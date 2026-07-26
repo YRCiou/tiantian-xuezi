@@ -47,6 +47,10 @@ function nextTask() {
       if ((store.unit(u.id)[l.key] || 0) < 1) return { type: "unit", unit: u, lesson: l };
     }
   }
+  // 第三階段:仿檢定模擬考(80分=2星才算通過)
+  for (const e of EXAMS) {
+    if (store.examStars(e.id) < 2) return { type: "exam", exam: e };
+  }
   return null;
 }
 
@@ -55,9 +59,14 @@ function viewHome() {
   const streak = store.streakNow();
   const known = store.knownChars();
   const stamped = store.data.days[todayStr()];
-  const heroNav = !task ? "/rewards" : (task.type === "bpmf" ? `/games/${task.level + 1}` : `/unit/${task.unit.id}/${task.lesson.key}`);
+  const heroNav = !task ? "/rewards" :
+    task.type === "bpmf" ? `/games/${task.level + 1}` :
+    task.type === "exam" ? `/exam/${task.exam.id}` :
+    `/unit/${task.unit.id}/${task.lesson.key}`;
   const heroLabel = !task ? "🎉 全部完成了,你太厲害了!" :
-    (task.type === "bpmf" ? `🅱️ 注音暖身・第 ${task.level + 1} 關` : `${task.unit.emoji} ${task.unit.title}・${task.lesson.emoji} ${task.lesson.title}`);
+    task.type === "bpmf" ? `🅱️ 注音暖身・第 ${task.level + 1} 關` :
+    task.type === "exam" ? `${task.exam.emoji} 檢定挑戰・${task.exam.title}` :
+    `${task.unit.emoji} ${task.unit.title}・${task.lesson.emoji} ${task.lesson.title}`;
   app.innerHTML = `<div class="screen">
     ${topbar(null, "歡迎來到天天學字!先學注音符號當暖身,注音十關都過了,就會打開識字課程。點中間橘色的大卡片,開始今天的學習。")}
     <div class="home-title">天天學字</div>
@@ -76,6 +85,7 @@ function viewHome() {
       <div class="menu-card c2" onclick="A.nav('/bpmf')"><span class="emoji">🅱️</span><span class="label">注音符號</span><span class="hint">第一步</span></div>
       <div class="menu-card c3" onclick="A.nav('/games')"><span class="emoji">🎧</span><span class="label">注音闖關</span><span class="hint">暖身十關</span></div>
       <div class="menu-card c1" onclick="A.nav('/units')"><span class="emoji">📚</span><span class="label">識字單元</span><span class="hint">${store.bpmfDone() ? "主課程" : "🔒 先過注音"}</span></div>
+      <div class="menu-card c1" onclick="A.nav('/exam')"><span class="emoji">🎓</span><span class="label">檢定挑戰</span><span class="hint">${store.allUnitsDone() ? "最終考驗" : "🔒 完成單元後"}</span></div>
       <div class="menu-card c4" onclick="A.nav('/write')"><span class="emoji">✍️</span><span class="label">寫字練習</span><span class="hint">動動手</span></div>
       <div class="menu-card c5" onclick="A.nav('/rewards')"><span class="emoji">🏅</span><span class="label">我的獎勵</span><span class="hint">月曆徽章</span></div>
     </div>
@@ -551,6 +561,95 @@ function finishBpmfQuiz() {
   });
 }
 
+/* ================= 檢定挑戰(仿全民中檢初等題型) ================= */
+function viewExams() {
+  const unlocked = store.allUnitsDone();
+  app.innerHTML = `<div class="screen">
+    ${topbar("/", "這裡是檢定挑戰,題目模仿正式的中文檢定考試。把十個識字單元都完成,就可以開始挑戰。每回十題,答對八題以上就算通過!")}
+    <div class="section-title">🎓 檢定挑戰</div>
+    <div class="sub-note">${unlocked ? "每回 10 題,80 分以上通過!" : "🔒 先完成全部識字單元,就會打開囉!"}</div>
+    <div class="lesson-list">
+      ${EXAMS.map(e => {
+        const s = store.examStars(e.id);
+        return `<div class="lesson-card ${s >= 2 ? "done" : ""} ${unlocked ? "" : "locked-card"}" style="${unlocked ? "" : "opacity:.55"}"
+          onclick="${unlocked ? `A.nav('/exam/${e.id}')` : "A.examLocked()"}">
+          <span class="l-emoji">${unlocked ? e.emoji : "🔒"}</span>
+          <span class="l-title">${e.title}<div style="font-size:20px;color:#7a6a58;font-weight:normal">選字・聽寫・讀句子</div></span>
+          <span class="l-stars">${"⭐".repeat(s)}${"☆".repeat(3 - s)}</span>
+        </div>`;
+      }).join("")}
+    </div>
+    <div class="sub-note" style="margin-top:20px">題型參考全民中文能力檢定(初等),都是原創練習題。<br>三回都考到 80 分,就拿到「檢定小狀元」徽章 🏆</div>
+  </div>`;
+}
+A.examLocked = () => speak("檢定挑戰還沒打開喔!先把十個識字單元都完成,就可以來考考看了。");
+
+let ex = null; // 考試狀態
+function startExam(id) {
+  const e = EXAM_BY_ID[id];
+  if (!e) return nav("/exam");
+  if (!store.allUnitsDone()) { viewExams(); A.examLocked(); return; }
+  ex = { exam: e, qIdx: -1, correct: 0, awaiting: false };
+  speak("檢定開始!慢慢看題目,不會的可以點喇叭聽。答對八題以上就通過!");
+  setTimeout(nextExamQ, 2600);
+}
+function nextExamQ() {
+  ex.qIdx++;
+  if (ex.qIdx >= ex.exam.questions.length) return finishExam();
+  const q = ex.exam.questions[ex.qIdx];
+  ex.awaiting = true; ex.firstTry = true;
+  const progress = ex.exam.questions.map((_, k) => k < ex.qIdx ? "🟢" : (k === ex.qIdx ? "🔵" : "⚪")).join(" ");
+  const isListen = q.t === "聽";
+  app.innerHTML = `<div class="screen">
+    ${topbar("/exam", "像真的考試一樣,自己讀題目,從四個選項裡點出正確答案。看不懂可以點藍色喇叭,把題目唸給你聽。")}
+    <div class="section-title">${ex.exam.emoji} ${ex.exam.title}</div>
+    <div class="quiz-progress">${progress}</div>
+    ${isListen
+      ? `<button class="big-sound-btn" onclick="A.playE()">🔊</button>
+         <div class="sub-note">${esc(q.q)}</div>`
+      : `<div class="quiz-prompt"><div class="qp-text" style="font-size:32px">${esc(q.q).replace(/（\s*）|（　+）|\(　*\)/g, '<span class="blank">?</span>')}</div>
+         <div style="font-size:22px;color:#7a6a58;margin-top:8px" onclick="A.playE()">🔊 點我聽題目</div></div>`}
+    <div class="choice-row" style="grid-template-columns:repeat(2,1fr)">
+      ${q.opts.map((o, i) => `<button class="choice-btn" id="ex${i}" style="font-size:${o.length > 4 ? 28 : 44}px;padding:22px 6px" onclick="A.answerE(${i})">${esc(o)}</button>`).join("")}
+    </div>
+  </div>`;
+  if (isListen) setTimeout(() => A.playE(), 350);
+}
+A.playE = () => {
+  const q = ex.exam.questions[ex.qIdx];
+  if (q.t === "聽") speak(q.say);
+  else speak(q.q.replace(/（\s*）|（　+）|\(　*\)/g, "空格"), 0.8);
+};
+A.answerE = i => {
+  if (!ex.awaiting) return;
+  const q = ex.exam.questions[ex.qIdx];
+  const btn = document.getElementById("ex" + i);
+  if (i === q.a) {
+    ex.awaiting = false;
+    if (ex.firstTry) ex.correct++;
+    btn.classList.add("correct"); bigPop("⭕"); praise();
+    setTimeout(() => nextExamQ(), 1900);
+  } else {
+    ex.firstTry = false;
+    btn.classList.add("wrong"); encourage();
+  }
+};
+function finishExam() {
+  const score = ex.correct * 10;
+  const stars = score >= 100 ? 3 : score >= 80 ? 2 : score >= 60 ? 1 : 0;
+  store.setExam(ex.exam.id, stars);
+  const passed = score >= 80;
+  const nextExam = EXAMS.find(e => store.examStars(e.id) < 2);
+  finishScreen({
+    stars,
+    title: score === 100 ? "一百分!太厲害了!" : passed ? `${score} 分,通過了!` : `${score} 分,再練習一下!`,
+    sub: passed ? "已經有檢定的實力囉!" : "回去複習單元,再來挑戰!",
+    retry: `/exam/${ex.exam.id}`,
+    next: passed && nextExam ? `/exam/${nextExam.id}` : "/exam",
+    nextLabel: passed && nextExam ? "➡️ 下一回" : "📋 回列表",
+  });
+}
+
 /* ================= 我的獎勵 ================= */
 function viewRewards() {
   const now = new Date();
@@ -634,6 +733,8 @@ function render() {
   if ((m = p.match(/^\/games\/(\d+)$/))) return viewBpmfQuiz(+m[1] - 1);
   if (p === "/write") return viewWriteMenu();
   if ((m = p.match(/^\/write\/(.+)$/))) { writeQueue = []; return openTrace(m[1], "/write", null); }
+  if (p === "/exam") return viewExams();
+  if ((m = p.match(/^\/exam\/(\d+)$/))) return startExam(+m[1]);
   if (p === "/rewards") return viewRewards();
   if (p === "/settings") return viewSettings();
   viewHome();

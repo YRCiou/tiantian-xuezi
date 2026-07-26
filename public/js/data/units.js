@@ -263,4 +263,5 @@ const BADGES = [
   { id:"chars-100",    emoji:"🏆", name:"百字達人", desc:"學會 100 個字" },
   { id:"all-units",    emoji:"🌟", name:"識字畢業生", desc:"完成全部單元" },
   { id:"bpmf-all",     emoji:"🎓", name:"注音小老師", desc:"注音闖關全過" },
+  { id:"exam-pass",    emoji:"🏆", name:"檢定小狀元", desc:"三回模擬考都80分以上" },
 ];

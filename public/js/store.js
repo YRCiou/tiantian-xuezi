@@ -104,6 +104,22 @@ const store = {
   bpmfDone() {
     return BPMF_LEVELS.every((_, i) => (this.data.bpmf.levels[i] || 0) >= 1);
   },
+  allUnitsDone() {
+    return UNITS.every(u => this.unitDone(u.id));
+  },
+  examStars(id) {
+    if (!this.data.exams) this.data.exams = {};
+    return this.data.exams[id] || 0;
+  },
+  setExam(id, stars) {
+    if (!this.data.exams) this.data.exams = {};
+    const gained = Math.max(0, stars - (this.data.exams[id] || 0));
+    if (gained > 0) { this.data.exams[id] = stars; this.data.stars += gained; }
+    this.stampToday();
+    this.checkBadges();
+    this.save();
+    return gained;
+  },
   unitUnlocked(id) {
     if (id === 1) return this.bpmfDone(); // 先學會注音,才開始識字
     return this.unitDone(id - 1);
@@ -150,6 +166,7 @@ const store = {
     if (k >= 60) earn("chars-60");
     if (k >= 100) earn("chars-100");
     if (BPMF_LEVELS.every((_, i) => (this.data.bpmf.levels[i] || 0) >= 1)) earn("bpmf-all");
+    if (EXAMS.every(e => this.examStars(e.id) >= 2)) earn("exam-pass"); // 2星=80分以上
     return newly;
   },
 };
