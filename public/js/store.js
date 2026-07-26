@@ -101,8 +101,11 @@ const store = {
     if (!u) return 0;
     return LESSONS.reduce((s, l) => s + (u[l.key] || 0), 0);
   },
+  bpmfDone() {
+    return BPMF_LEVELS.every((_, i) => (this.data.bpmf.levels[i] || 0) >= 1);
+  },
   unitUnlocked(id) {
-    if (id === 1) return true;
+    if (id === 1) return this.bpmfDone(); // 先學會注音,才開始識字
     return this.unitDone(id - 1);
   },
   knownChars() {

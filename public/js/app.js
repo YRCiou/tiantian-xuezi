@@ -36,10 +36,15 @@ function topbar(backPath, helpText) {
 
 /* ================= 首頁 ================= */
 function nextTask() {
+  // 第一階段:先把注音十關過完,才進識字主課程
+  if (!store.bpmfDone()) {
+    const lv = BPMF_LEVELS.findIndex((_, i) => (store.data.bpmf.levels[i] || 0) < 1);
+    return { type: "bpmf", level: lv };
+  }
   for (const u of UNITS) {
     if (!store.unitUnlocked(u.id)) break;
     for (const l of LESSONS) {
-      if ((store.unit(u.id)[l.key] || 0) < 1) return { unit: u, lesson: l };
+      if ((store.unit(u.id)[l.key] || 0) < 1) return { type: "unit", unit: u, lesson: l };
     }
   }
   return null;
@@ -50,13 +55,17 @@ function viewHome() {
   const streak = store.streakNow();
   const known = store.knownChars();
   const stamped = store.data.days[todayStr()];
+  const heroNav = !task ? "/rewards" : (task.type === "bpmf" ? `/games/${task.level + 1}` : `/unit/${task.unit.id}/${task.lesson.key}`);
+  const heroLabel = !task ? "🎉 全部完成了,你太厲害了!" :
+    (task.type === "bpmf" ? `🅱️ 注音暖身・第 ${task.level + 1} 關` : `${task.unit.emoji} ${task.unit.title}・${task.lesson.emoji} ${task.lesson.title}`);
   app.innerHTML = `<div class="screen">
-    ${topbar(null, "歡迎來到天天學字!點中間橘色的大卡片,開始今天的學習。下面還有識字單元、注音符號、寫字練習、和你的獎勵。")}
+    ${topbar(null, "歡迎來到天天學字!先學注音符號當暖身,注音十關都過了,就會打開識字課程。點中間橘色的大卡片,開始今天的學習。")}
     <div class="home-title">天天學字</div>
     <div class="home-sub">每天學一點,越學越棒!</div>
-    <div class="hero-card" onclick="${task ? `A.nav('/unit/${task.unit.id}/${task.lesson.key}')` : `A.nav('/rewards')`}">
+    <div class="hero-card" onclick="A.nav('${heroNav}')">
       <div class="hero-line1">${stamped ? "✅ 今天已經學過了,再玩一次也可以!" : "☀️ 今天的任務"}</div>
-      <div class="hero-line2">${task ? `${task.unit.emoji} ${task.unit.title}・${task.lesson.emoji} ${task.lesson.title}` : "🎉 全部完成了,你太厲害了!"}</div>
+      <div class="hero-line2">${heroLabel}</div>
+      ${task && task.type === "bpmf" ? `<div style="font-size:22px;color:#7a6a58;margin-top:6px">先學會注音,識字課程就會打開!</div>` : ""}
     </div>
     <div class="stat-row">
       <div class="stat-box"><div class="num">🔥${streak}</div><div class="lbl">連續天數</div></div>
@@ -64,9 +73,9 @@ function viewHome() {
       <div class="stat-box"><div class="num">⭐${store.data.stars}</div><div class="lbl">星星</div></div>
     </div>
     <div class="menu">
-      <div class="menu-card c1" onclick="A.nav('/units')"><span class="emoji">📚</span><span class="label">識字單元</span><span class="hint">主課程</span></div>
-      <div class="menu-card c2" onclick="A.nav('/bpmf')"><span class="emoji">🅱️</span><span class="label">注音符號</span><span class="hint">ㄅㄆㄇ</span></div>
-      <div class="menu-card c3" onclick="A.nav('/games')"><span class="emoji">🎧</span><span class="label">注音闖關</span><span class="hint">聽聲音</span></div>
+      <div class="menu-card c2" onclick="A.nav('/bpmf')"><span class="emoji">🅱️</span><span class="label">注音符號</span><span class="hint">第一步</span></div>
+      <div class="menu-card c3" onclick="A.nav('/games')"><span class="emoji">🎧</span><span class="label">注音闖關</span><span class="hint">暖身十關</span></div>
+      <div class="menu-card c1" onclick="A.nav('/units')"><span class="emoji">📚</span><span class="label">識字單元</span><span class="hint">${store.bpmfDone() ? "主課程" : "🔒 先過注音"}</span></div>
       <div class="menu-card c4" onclick="A.nav('/write')"><span class="emoji">✍️</span><span class="label">寫字練習</span><span class="hint">動動手</span></div>
       <div class="menu-card c5" onclick="A.nav('/rewards')"><span class="emoji">🏅</span><span class="label">我的獎勵</span><span class="hint">月曆徽章</span></div>
     </div>
@@ -76,19 +85,21 @@ function viewHome() {
 
 /* ================= 識字單元列表 ================= */
 function viewUnits() {
+  const bpmfOk = store.bpmfDone();
   app.innerHTML = `<div class="screen">
-    ${topbar("/", "這裡是識字課程,從第一單元開始,一個一個過關。完成一個單元,才會打開下一個單元。")}
+    ${topbar("/", "這裡是識字課程。要先把注音闖關的十關都過關,第一單元才會打開。之後完成一個單元,才會打開下一個單元。")}
     <div class="section-title">📚 識字單元</div>
+    ${bpmfOk ? "" : `<div class="sub-note">🔒 先到「注音闖關」把十關過完,就會打開囉!</div>`}
     <div class="unit-list">
       ${UNITS.map(u => {
         const unlocked = store.unitUnlocked(u.id);
         const done = store.unitDone(u.id);
         const doneCount = LESSONS.filter(l => (store.unit(u.id)[l.key] || 0) >= 1).length;
-        return `<div class="unit-card ${unlocked ? "" : "locked"}" onclick="${unlocked ? `A.nav('/unit/${u.id}')` : `A.lockedMsg()`}">
+        return `<div class="unit-card ${unlocked ? "" : "locked"}" onclick="${unlocked ? `A.nav('/unit/${u.id}')` : `A.lockedMsg(${u.id})`}">
           <span class="u-emoji">${unlocked ? u.emoji : "🔒"}</span>
           <span class="u-mid">
             <div class="u-title">第${u.id}單元 ${u.title}</div>
-            <div class="u-progress">${unlocked ? `完成 ${doneCount}/5 關` : "先完成上一個單元"}</div>
+            <div class="u-progress">${unlocked ? `完成 ${doneCount}/5 關` : (u.id === 1 ? "先完成注音闖關" : "先完成上一個單元")}</div>
           </span>
           <span class="unit-done-mark">${done ? "🏆" : ""}</span>
         </div>`;
@@ -96,7 +107,9 @@ function viewUnits() {
     </div>
   </div>`;
 }
-A.lockedMsg = () => speak("這個單元還沒打開喔!先把上一個單元的五關都完成,就可以玩了。");
+A.lockedMsg = id => speak(id === 1
+  ? "識字課程還沒打開喔!先到注音闖關,把十關都過關,就可以開始認字了。"
+  : "這個單元還沒打開喔!先把上一個單元的五關都完成,就可以玩了。");
 
 /* ================= 單元關卡列表 ================= */
 function viewUnit(id) {
@@ -454,8 +467,9 @@ A.sayBpmf = z => { const s = SYM[z]; speak(`${s.sound}。${s.word}的${s.sound}�
 /* ================= 注音闖關 ================= */
 function viewGames() {
   app.innerHTML = `<div class="screen">
-    ${topbar("/", "選一關來玩!聽聲音,找出正確的注音符號,就可以拿星星。過了一關,下一關才會打開。")}
+    ${topbar("/", "選一關來玩!聽聲音,找出正確的注音符號,就可以拿星星。過了一關,下一關才會打開。十關都過了,識字課程就會打開!")}
     <div class="section-title">🎧 注音闖關</div>
+    ${store.bpmfDone() ? "" : `<div class="sub-note">十關全過,就打開識字課程!📚</div>`}
     <div class="level-grid">
       ${BPMF_LEVELS.map((syms, i) => {
         const stars = store.data.bpmf.levels[i] || 0;
@@ -518,10 +532,14 @@ A.answerB = i => {
   }
 };
 function finishBpmfQuiz() {
+  const wasDone = store.bpmfDone();
   const stars = bq.correct >= 5 ? 3 : bq.correct >= 4 ? 2 : bq.correct >= 3 ? 1 : 0;
   const prev = store.data.bpmf.levels[bq.level] || 0;
   if (stars > prev) { store.data.stars += stars - prev; store.data.bpmf.levels[bq.level] = stars; }
   store.stampToday(); store.checkBadges(); store.save();
+  if (!wasDone && store.bpmfDone()) {
+    setTimeout(() => { confetti(26); applause(2); speak("哇!注音十關全部過關!識字課程打開了,明天開始學認字囉!"); }, 2800);
+  }
   const hasNext = bq.level + 1 < BPMF_LEVELS.length;
   finishScreen({
     stars,
