@@ -281,3 +281,27 @@ canvas#traceCanvas {
   60% { transform: translate(-50%,-50%) scale(1.3); }
   100% { transform: translate(-50%,-50%) scale(1); opacity: 0; }
 }
+
+/* ===== 2.0 新增:季分組、朗讀、練習區 ===== */
+.menu-divider {
+  font-size: 24px; font-weight: 900; color: #7a6a58; text-align: center;
+  margin: 22px 0 10px; padding-top: 14px; border-top: 4px dashed var(--gray-light);
+}
+.stage-head { margin: 24px 0 10px; padding: 12px 16px; background: var(--gray-light); border-radius: 18px; }
+.stage-head .st-title { font-size: 30px; font-weight: 900; color: var(--primary-dark); }
+.stage-head .st-sub { font-size: 20px; color: #7a6a58; margin-top: 2px; }
+.unit-card.review-card { border-color: var(--blue); background: #EAF2FB; }
+.unit-card.qexam-card { border-color: var(--gold); background: #FFF6DC; }
+.lesson-card.locked { border-color: var(--gray); opacity: .55; }
+.say-along {
+  font-size: 24px; text-align: center; color: var(--purple); font-weight: bold;
+  background: #F3ECFA; border: 4px dashed var(--purple); border-radius: 20px;
+  padding: 14px 12px; margin: 14px 0;
+}
+.story-box {
+  background: var(--card); border: 5px solid var(--primary); border-radius: 24px;
+  padding: 22px 20px; font-size: 34px; line-height: 1.9; box-shadow: var(--shadow);
+}
+.story-line { cursor: pointer; border-radius: 10px; padding: 2px 0; }
+.story-line:active, .story-line.hl { background: var(--gold); }
+.qp-hint { font-size: 22px; color: #7a6a58; margin-top: 8px; }

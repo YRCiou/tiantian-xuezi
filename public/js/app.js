@@ -1,22 +1,14 @@
 /* 天天學字 — 路由 + 畫面
-   每個選單都是獨立網址:
-   /            首頁(今日任務)
-   /units       識字單元列表
-   /unit/3      單元 3 的關卡列表
-   /unit/3/listen  單元 3 的聽力關
-   /bpmf        注音總表
-   /bpmf/ㄅ     注音學習卡
-   /games       注音闖關
-   /games/2     注音第 2 關
-   /write       手寫選字
-   /write/媽    手寫「媽」
-   /rewards     我的獎勵(月曆、徽章)
-   /settings    學號與還原
+   主課程(識字):/units /unit/3 /unit/3/listen /review/5 /qexam/1 /exam
+   練習區(永遠玩不完):/daily 每日挑戰 /tower 闖關塔 /reading 朗讀 /box 錯字複習
+   補充教材:/bpmf /games
+   其他:/write /rewards /settings
 */
 const app = document.getElementById("app");
 const A = {}; // 全域事件處理器,給 inline onclick 用
 
 function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+const BLANK = /（\s*）|（　+）|\(　*\)|（　*\)/g;
 
 function nav(path) {
   stopSpeak();
@@ -33,109 +25,345 @@ function topbar(backPath, helpText) {
     <button class="btn-help" onclick="speak('${esc(helpText)}', 0.85)">🔊</button>
   </div>`;
 }
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
+// 用日期當種子的亂數(每日挑戰:同一天題目一樣,隔天換新的)
+function seededRand(seedStr) {
+  let h = 1779033703 ^ seedStr.length;
+  for (let i = 0; i < seedStr.length; i++) { h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+  return function () { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
+}
+function seededShuffle(a, rnd) {
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+/* ================= 出題引擎 ================= */
+// 把句子或詞語裡所有的目標字都挖成空格(只挖第一個的話,重複出現時會露答案)
+function blankOut(text, ch) {
+  return esc(text).split(ch).join('<span class="blank">?</span>');
+}
+// 把短文切成一句一句(不用 lookbehind,舊版 Safari 也能跑)
+function splitSentences(text) {
+  const out = []; let cur = "";
+  for (const ch of text) { cur += ch; if ("。!?".includes(ch)) { out.push(cur); cur = ""; } }
+  if (cur.trim()) out.push(cur);
+  return out;
+}
+// 固定資料的選項要洗牌,否則正解永遠在同一個位置,一直點第一個就會過關
+function shuffleOpts(opts, a) {
+  const right = opts[a];
+  const mixed = shuffle(opts.slice());
+  return { opts: mixed, a: mixed.indexOf(right) };
+}
+// 題目物件:{ type, item, say, promptHtml, opts:[字], a:正解索引 }
+function distractors(target, pool, n) {
+  const others = pool.filter(it => it.w !== target.w);
+  const shuffled = shuffle(others.slice());
+  // 優先挑注音開頭相同(音近)或例詞主題相近的字,增加鑑別度
+  shuffled.sort((x, y) => {
+    const sim = it => (it.zy[0] === target.zy[0] ? 1 : 0);
+    return sim(y) - sim(x);
+  });
+  const near = shuffled.slice(0, Math.max(n * 2, 4));
+  return shuffle(near).slice(0, n);
+}
+function makeQuestion(item, kind, pool, optCount) {
+  const n = (optCount || 3) - 1;
+  const wrongs = distractors(item, pool, n);
+  const opts = shuffle([item, ...wrongs]).map(it => it.w);
+  const a = opts.indexOf(item.w);
+  const base = { item, opts, a, type: kind };
+  if (kind === "listen") {
+    return Object.assign(base, {
+      say: `${item.w}。${item.word}的${item.w}`,
+      promptHtml: `<button class="big-sound-btn" onclick="A.sayQ()">🔊</button>`,
+      autoPlay: true,
+    });
+  }
+  if (kind === "look") {
+    // 只給圖案和聲音,字不能出現在題目上(不然等於把答案寫出來)
+    return Object.assign(base, {
+      say: item.word,
+      rate: 0.8,
+      promptHtml: `<div class="quiz-prompt" onclick="A.sayQ()"><div class="qp-emoji" style="font-size:110px">${item.e}</div>
+        <div class="qp-hint">🔊 點圖案,再聽一次這個詞</div></div>`,
+      autoPlay: true,
+    });
+  }
+  if (kind === "word") {
+    const word = pick(item.words && item.words.length ? item.words : [item.word]);
+    return Object.assign(base, {
+      say: word,
+      rate: 0.75,
+      promptHtml: `<div class="quiz-prompt" onclick="A.sayQ()"><div class="qp-emoji">${item.e}</div>
+        <div class="qp-text">${blankOut(word, item.w)}</div>
+        <div class="qp-hint">🔊 點一下,再聽一次這個詞</div></div>`,
+      autoPlay: true,
+    });
+  }
+  // sentence
+  return Object.assign(base, {
+    say: item.s,
+    rate: 0.8,
+    promptHtml: `<div class="quiz-prompt" onclick="A.sayQ()"><div class="qp-text">${blankOut(item.s, item.w)}</div>
+      <div class="qp-hint">🔊 點句子可以再聽一次</div></div>`,
+    autoPlay: true,
+  });
+}
+// 混合題:給小考、總複習、每日挑戰、闖關塔用
+function makeMixed(items, pool, plan, optCount, rnd) {
+  const shuf = rnd ? seededShuffle(items.slice(), rnd) : shuffle(items.slice());
+  const qs = [];
+  let i = 0;
+  plan.forEach(([kind, count]) => {
+    for (let k = 0; k < count; k++) {
+      const item = shuf[i % shuf.length]; i++;
+      qs.push(makeQuestion(item, kind, pool, optCount));
+    }
+  });
+  return rnd ? seededShuffle(qs, rnd) : shuffle(qs);
+}
+
+/* ================= 測驗流程(全站共用) ================= */
+let Q = null; // { title, emoji, back, help, questions, idx, correct, awaiting, firstTry, onFinish }
+function runQuiz(cfg) {
+  Q = Object.assign({ idx: -1, correct: 0, awaiting: false }, cfg);
+  if (!Q.questions.length) { speak("這裡還沒有題目喔!"); return nav(Q.back); }
+  speak(Q.intro || "仔細看題目,點出正確的答案!");
+  setTimeout(nextQ, 2200);
+}
+function nextQ() {
+  Q.idx++;
+  if (Q.idx >= Q.questions.length) return finishRun();
+  const q = Q.questions[Q.idx];
+  Q.awaiting = true; Q.firstTry = true;
+  const progress = Q.questions.map((_, k) => k < Q.idx ? "🟢" : (k === Q.idx ? "🔵" : "⚪")).join(" ");
+  const wide = q.opts.some(o => o.length > 2) || q.opts.length > 3;
+  app.innerHTML = `<div class="screen">
+    ${topbar(Q.back, Q.help)}
+    <div class="section-title">${Q.emoji} ${esc(Q.title)}</div>
+    <div class="quiz-progress">${progress}</div>
+    ${q.promptHtml}
+    <div class="choice-row" ${wide ? 'style="grid-template-columns:repeat(2,1fr)"' : ""}>
+      ${q.opts.map((o, i) => `<button class="choice-btn" id="ch${i}" ${o.length > 3 ? 'style="font-size:30px"' : ""} onclick="A.answer(${i})">${esc(o)}</button>`).join("")}
+    </div>
+  </div>`;
+  if (q.autoPlay) setTimeout(() => A.sayQ(), 350);
+}
+A.sayQ = () => { const q = Q.questions[Q.idx]; if (q.say) speak(q.say, q.rate || 1); };
+A.answer = i => {
+  if (!Q.awaiting) return;
+  const q = Q.questions[Q.idx];
+  const btn = document.getElementById("ch" + i);
+  if (i === q.a) {
+    Q.awaiting = false;
+    if (Q.firstTry) { Q.correct++; if (q.item) store.boxHit(q.item.w); }
+    btn.classList.add("correct"); bigPop("⭕"); praise();
+    setTimeout(() => nextQ(), 1900);
+  } else {
+    if (Q.firstTry && q.item) store.boxAdd(q.item.w);
+    Q.firstTry = false;
+    btn.classList.add("wrong"); encourage();
+    setTimeout(() => A.sayQ(), 2600);
+  }
+};
+function finishRun() {
+  const n = Q.questions.length;
+  const score = Math.round(Q.correct / n * 100);
+  Q.onFinish(score, Q.correct, n);
+}
+
+/* ================= 過關畫面 ================= */
+function finishScreen(opt) {
+  app.innerHTML = `<div class="screen">
+    <div class="topbar"><span></span><span class="star-count">⭐ ${store.data.stars}</span><span></span></div>
+    <div class="result-box">
+      <div class="result-stars">${opt.stars > 0 ? "⭐".repeat(opt.stars) : "💪"}</div>
+      <div class="result-text">${esc(opt.title)}</div>
+      <div class="result-sub">${esc(opt.sub || "")}</div>
+      <div class="action-row" style="max-width:480px;margin:0 auto;">
+        <button class="action-btn bg-blue" onclick="A.nav('${opt.retry}')">${opt.retryLabel || "🔁 再玩一次"}</button>
+        <button class="action-btn bg-green" onclick="A.nav('${opt.next}')">${opt.nextLabel}</button>
+      </div>
+      ${opt.note ? `<div class="sub-note" style="margin-top:16px">${esc(opt.note)}</div>` : ""}
+    </div>
+  </div>`;
+  if (opt.stars > 0) celebrate();
+  speak(opt.say || (opt.title + (opt.stars > 0 ? `你得到${opt.stars}顆星星!` : "")), 0.95);
+  const newly = store.checkBadges(); store.save();
+  if (opt.extraCelebrate) setTimeout(() => { confetti(24); speak(opt.extraCelebrate); }, 2600);
+  if (newly.length) setTimeout(() => { bigPop("🏅"); speak(`恭喜你得到新徽章:${newly.map(b => b.name).join("、")}!`); }, 4200);
+}
+// 單元關卡結算(60 分過關,不過就回去複習)
+function finishLesson(uid, key, score, correct, n) {
+  store.setLesson(uid, key, score);
+  const pass = score >= PASS;
+  const i = LESSONS.findIndex(l => l.key === key);
+  const nextKey = LESSONS[i + 1] ? LESSONS[i + 1].key : null;
+  const unitJustDone = key === "utest" && pass;
+  finishScreen({
+    stars: starsOf(score),
+    title: score === 100 ? "一百分!太厲害了!" : pass ? `${score} 分,過關了!` : `${score} 分,再練習一次!`,
+    sub: `答對 ${correct} 題(共 ${n} 題)`,
+    retry: `/unit/${uid}/${key}`,
+    next: pass ? (nextKey ? `/unit/${uid}/${nextKey}` : `/unit/${uid}`) : `/unit/${uid}/learn`,
+    nextLabel: pass ? (nextKey ? "➡️ 下一關" : "📋 回單元") : "📖 回去學一學",
+    note: pass ? "" : "六十分才能過關喔,我們再複習一次,你一定可以的!",
+    extraCelebrate: unitJustDone ? `太好了!第${uid}單元全部完成!` : null,
+  });
+}
 
 /* ================= 首頁 ================= */
 function nextTask() {
-  // 第一階段:先把注音十關過完,才進識字主課程
-  if (!store.bpmfDone()) {
-    const lv = BPMF_LEVELS.findIndex((_, i) => (store.data.bpmf.levels[i] || 0) < 1);
-    return { type: "bpmf", level: lv };
-  }
+  // 1. 錯字太多先複習
+  if (store.boxCount() >= 5) return { type: "box" };
+  // 2. 主課程:單元 → 總複習 → 季檢定
   for (const u of UNITS) {
     if (!store.unitUnlocked(u.id)) break;
     for (const l of LESSONS) {
-      if ((store.unit(u.id)[l.key] || 0) < 1) return { type: "unit", unit: u, lesson: l };
+      if (store.lessonScore(u.id, l.key) < PASS) return { type: "unit", unit: u, lesson: l };
     }
+    if (REVIEW_POINTS.includes(u.id) && store.reviewScore(u.id) < PASS) return { type: "review", n: u.id };
+    const st = stageOfUnit(u.id);
+    if (u.id === st.units[1] && store.qexamScore(st.id) < PASS) return { type: "qexam", stage: st };
   }
-  // 第三階段:仿檢定模擬考(80分=2星才算通過)
-  for (const e of EXAMS) {
-    if (store.examStars(e.id) < 2) return { type: "exam", exam: e };
-  }
-  return null;
+  // 3. 模擬考
+  for (const e of EXAMS) if (store.examScore(e.id) < 80) return { type: "exam", exam: e };
+  // 4. 主課程全破 → 每天都有得玩
+  if (!store.dailyDone()) return { type: "daily" };
+  return { type: "tower" };
 }
-
+function taskCard(task) {
+  const m = {
+    box:    { nav: "/box",    label: `🔁 複習錯過的字(${store.boxCount()} 個)`, hint: "先把不熟的字補起來" },
+    daily:  { nav: "/daily",  label: "📅 今天的每日挑戰", hint: "每天都有新題目" },
+    tower:  { nav: "/tower",  label: `🗼 闖關塔・第 ${store.towerBest() + 1} 層`, hint: "一層一層往上爬,沒有盡頭" },
+  };
+  if (m[task.type]) return m[task.type];
+  if (task.type === "unit") return { nav: `/unit/${task.unit.id}/${task.lesson.key}`, label: `${task.unit.emoji} 第${task.unit.id}單元 ${task.unit.title}・${task.lesson.emoji} ${task.lesson.title}`, hint: task.lesson.desc };
+  if (task.type === "review") return { nav: `/review/${task.n}`, label: `🔁 第 ${task.n - 4} 到 ${task.n} 單元・總複習`, hint: "考過六十分,才能繼續往下學" };
+  if (task.type === "qexam") return { nav: `/qexam/${task.stage.id}`, label: `🎯 第${task.stage.id}季 季檢定・${task.stage.title}`, hint: "這一季的總驗收" };
+  return { nav: `/exam/${task.exam.id}`, label: `🎓 檢定挑戰・${task.exam.title}`, hint: "仿正式檢定的模擬考" };
+}
 function viewHome() {
   const task = nextTask();
+  const card = taskCard(task);
   const streak = store.streakNow();
-  const known = store.knownChars();
   const stamped = store.data.days[todayStr()];
-  const heroNav = !task ? "/rewards" :
-    task.type === "bpmf" ? `/games/${task.level + 1}` :
-    task.type === "exam" ? `/exam/${task.exam.id}` :
-    `/unit/${task.unit.id}/${task.lesson.key}`;
-  const heroLabel = !task ? "🎉 全部完成了,你太厲害了!" :
-    task.type === "bpmf" ? `🅱️ 注音暖身・第 ${task.level + 1} 關` :
-    task.type === "exam" ? `${task.exam.emoji} 檢定挑戰・${task.exam.title}` :
-    `${task.unit.emoji} ${task.unit.title}・${task.lesson.emoji} ${task.lesson.title}`;
+  const box = store.boxCount();
+  const open = store.practiceOpen();
   app.innerHTML = `<div class="screen">
-    ${topbar(null, "歡迎來到天天學字!先學注音符號當暖身,注音十關都過了,就會打開識字課程。點中間橘色的大卡片,開始今天的學習。")}
+    ${topbar(null, "歡迎來到天天學字!點中間橘色的大卡片,就會帶你去今天要學的東西。下面的識字單元是主課程,旁邊還有每日挑戰、闖關塔可以一直玩。")}
     <div class="home-title">天天學字</div>
     <div class="home-sub">每天學一點,越學越棒!</div>
-    <div class="hero-card" onclick="A.nav('${heroNav}')">
+    <div class="hero-card" onclick="A.nav('${card.nav}')">
       <div class="hero-line1">${stamped ? "✅ 今天已經學過了,再玩一次也可以!" : "☀️ 今天的任務"}</div>
-      <div class="hero-line2">${heroLabel}</div>
-      ${task && task.type === "bpmf" ? `<div style="font-size:22px;color:#7a6a58;margin-top:6px">先學會注音,識字課程就會打開!</div>` : ""}
+      <div class="hero-line2">${card.label}</div>
+      <div style="font-size:22px;color:#7a6a58;margin-top:6px">${card.hint}</div>
     </div>
     <div class="stat-row">
       <div class="stat-box"><div class="num">🔥${streak}</div><div class="lbl">連續天數</div></div>
-      <div class="stat-box"><div class="num">${known}</div><div class="lbl">認識的字</div></div>
+      <div class="stat-box"><div class="num">${store.knownChars()}</div><div class="lbl">認識的字</div></div>
       <div class="stat-box"><div class="num">⭐${store.data.stars}</div><div class="lbl">星星</div></div>
     </div>
     <div class="menu">
-      <div class="menu-card c2" onclick="A.nav('/bpmf')"><span class="emoji">🅱️</span><span class="label">注音符號</span><span class="hint">第一步</span></div>
-      <div class="menu-card c3" onclick="A.nav('/games')"><span class="emoji">🎧</span><span class="label">注音闖關</span><span class="hint">暖身十關</span></div>
-      <div class="menu-card c1" onclick="A.nav('/units')"><span class="emoji">📚</span><span class="label">識字單元</span><span class="hint">${store.bpmfDone() ? "主課程" : "🔒 先過注音"}</span></div>
-      <div class="menu-card c1" onclick="A.nav('/exam')"><span class="emoji">🎓</span><span class="label">檢定挑戰</span><span class="hint">${store.allUnitsDone() ? "最終考驗" : "🔒 完成單元後"}</span></div>
+      <div class="menu-card c1" onclick="A.nav('/units')"><span class="emoji">📚</span><span class="label">識字單元</span><span class="hint">主課程・40 單元</span></div>
+      <div class="menu-card c1" onclick="A.nav('/exam')"><span class="emoji">🎓</span><span class="label">檢定挑戰</span><span class="hint">${store.examUnlocked() ? "模擬考" : "🔒 過一季就開"}</span></div>
+    </div>
+    <div class="menu-divider">🎲 天天都能玩(不用等,隨時來)</div>
+    <div class="menu">
+      <div class="menu-card c3" onclick="A.nav('/daily')"><span class="emoji">📅</span><span class="label">每日挑戰</span><span class="hint">${!open ? "先學第一課" : store.dailyDone() ? "今天完成 ✅" : "每天換新題"}</span></div>
+      <div class="menu-card c2" onclick="A.nav('/tower')"><span class="emoji">🗼</span><span class="label">闖關塔</span><span class="hint">${open ? `最高 ${store.towerBest()} 層` : "先學第一課"}</span></div>
+      <div class="menu-card c4" onclick="A.nav('/reading')"><span class="emoji">📢</span><span class="label">朗讀練習</span><span class="hint">${open ? "唸出聲音" : "先學第一課"}</span></div>
+      <div class="menu-card c5" onclick="A.nav('/box')"><span class="emoji">🔁</span><span class="label">錯字複習</span><span class="hint">${box ? `${box} 個字要複習` : "目前都很好 👍"}</span></div>
       <div class="menu-card c4" onclick="A.nav('/write')"><span class="emoji">✍️</span><span class="label">寫字練習</span><span class="hint">動動手</span></div>
       <div class="menu-card c5" onclick="A.nav('/rewards')"><span class="emoji">🏅</span><span class="label">我的獎勵</span><span class="hint">月曆徽章</span></div>
+    </div>
+    <div class="menu-divider">🧩 補充教材(想練發音就來)</div>
+    <div class="menu">
+      <div class="menu-card c2" onclick="A.nav('/bpmf')"><span class="emoji">🅱️</span><span class="label">注音符號</span><span class="hint">學發音</span></div>
+      <div class="menu-card c3" onclick="A.nav('/games')"><span class="emoji">🎧</span><span class="label">注音闖關</span><span class="hint">十關小遊戲</span></div>
     </div>
     <div class="sync-note" style="margin-top:18px" onclick="A.nav('/settings')">🔑 我的學號:<b>${store.data.code}</b>(點我看說明)</div>
   </div>`;
 }
 
-/* ================= 識字單元列表 ================= */
+/* ================= 識字單元列表(依四季分組) ================= */
 function viewUnits() {
-  const bpmfOk = store.bpmfDone();
   app.innerHTML = `<div class="screen">
-    ${topbar("/", "這裡是識字課程。要先把注音闖關的十關都過關,第一單元才會打開。之後完成一個單元,才會打開下一個單元。")}
+    ${topbar("/", "這裡是識字主課程,一共四季四十個單元。完成一個單元,下一個就會打開。每五個單元有一次總複習,每一季最後有一次季檢定。")}
     <div class="section-title">📚 識字單元</div>
-    ${bpmfOk ? "" : `<div class="sub-note">🔒 先到「注音闖關」把十關過完,就會打開囉!</div>`}
-    <div class="unit-list">
-      ${UNITS.map(u => {
-        const unlocked = store.unitUnlocked(u.id);
-        const done = store.unitDone(u.id);
-        const doneCount = LESSONS.filter(l => (store.unit(u.id)[l.key] || 0) >= 1).length;
-        return `<div class="unit-card ${unlocked ? "" : "locked"}" onclick="${unlocked ? `A.nav('/unit/${u.id}')` : `A.lockedMsg(${u.id})`}">
-          <span class="u-emoji">${unlocked ? u.emoji : "🔒"}</span>
+    ${STAGES.map(st => {
+      const ids = []; for (let i = st.units[0]; i <= st.units[1]; i++) ids.push(i);
+      const doneN = ids.filter(i => store.unitDone(i)).length;
+      const stOpen = st.id === 1 || store.stageDone(st.id - 1);
+      return `<div class="stage-head">
+          <div class="st-title">${st.emoji} 第${st.id}季 ${st.title}</div>
+          <div class="st-sub">${stOpen ? `${st.desc}・完成 ${doneN}/10 單元` : `🔒 先通過第 ${st.id - 1} 季的季檢定`}</div>
+        </div>
+        <div class="unit-list">
+        ${ids.map(id => {
+          const u = UNIT_BY_ID[id];
+          if (!u) return "";
+          const unlocked = store.unitUnlocked(id);
+          const done = store.unitDone(id);
+          const n = store.unitProgress(id);
+          return `<div class="unit-card ${unlocked ? "" : "locked"}" onclick="${unlocked ? `A.nav('/unit/${id}')` : `A.lockedMsg(${id})`}">
+            <span class="u-emoji">${unlocked ? u.emoji : "🔒"}</span>
+            <span class="u-mid">
+              <div class="u-title">第${id}單元 ${esc(u.title)}</div>
+              <div class="u-progress">${unlocked ? `完成 ${n}/${LESSONS.length} 關` : store.unitLockReason(id)}</div>
+            </span>
+            <span class="unit-done-mark">${done ? "🏆" : ""}</span>
+          </div>`;
+        }).join("")}
+        ${REVIEW_POINTS.filter(n => n >= st.units[0] && n <= st.units[1]).map(n => {
+          const open = store.reviewUnlocked(n);
+          const sc = store.reviewScore(n);
+          return `<div class="unit-card review-card ${open ? "" : "locked"}" onclick="${open ? `A.nav('/review/${n}')` : "A.reviewLocked()"}">
+            <span class="u-emoji">${open ? "🔁" : "🔒"}</span>
+            <span class="u-mid">
+              <div class="u-title">總複習(第 ${n - 4} 到 ${n} 單元)</div>
+              <div class="u-progress">${sc >= PASS ? `${sc} 分 通過 ✅` : open ? "考過六十分才能繼續" : `先完成第 ${n} 單元`}</div>
+            </span>
+            <span class="unit-done-mark">${sc >= PASS ? "🏆" : ""}</span>
+          </div>`;
+        }).join("")}
+        <div class="unit-card qexam-card ${store.qexamUnlocked(st.id) ? "" : "locked"}" onclick="${store.qexamUnlocked(st.id) ? `A.nav('/qexam/${st.id}')` : "A.qexamLocked()"}">
+          <span class="u-emoji">${store.qexamUnlocked(st.id) ? "🎯" : "🔒"}</span>
           <span class="u-mid">
-            <div class="u-title">第${u.id}單元 ${u.title}</div>
-            <div class="u-progress">${unlocked ? `完成 ${doneCount}/5 關` : (u.id === 1 ? "先完成注音闖關" : "先完成上一個單元")}</div>
+            <div class="u-title">第${st.id}季 季檢定</div>
+            <div class="u-progress">${store.qexamScore(st.id) >= PASS ? `${store.qexamScore(st.id)} 分 通過 ✅` : "這一季的總驗收,六十分過關"}</div>
           </span>
-          <span class="unit-done-mark">${done ? "🏆" : ""}</span>
+          <span class="unit-done-mark">${store.qexamScore(st.id) >= PASS ? "🏆" : ""}</span>
+        </div>
         </div>`;
-      }).join("")}
-    </div>
+    }).join("")}
   </div>`;
 }
-A.lockedMsg = id => speak(id === 1
-  ? "識字課程還沒打開喔!先到注音闖關,把十關都過關,就可以開始認字了。"
-  : "這個單元還沒打開喔!先把上一個單元的五關都完成,就可以玩了。");
+A.lockedMsg = id => speak("這個單元還沒打開喔!" + store.unitLockReason(id) + ",就可以來學了。");
+A.reviewLocked = () => speak("總複習還沒打開喔!先把前面五個單元都完成。");
+A.qexamLocked = () => speak("季檢定還沒打開喔!先把這一季的十個單元和兩次總複習都完成。");
 
 /* ================= 單元關卡列表 ================= */
 function viewUnit(id) {
   const u = UNIT_BY_ID[id];
   if (!u) return nav("/units");
-  const p = store.unit(id);
   app.innerHTML = `<div class="screen">
-    ${topbar("/units", "這個單元有五關:先學一學認識新字,再玩聽聲音、看圖選字、句子填空,最後寫一寫。每一關都可以拿星星!下面還有好用的生活句,點了就唸給你聽。")}
-    <div class="section-title">${u.emoji} 第${u.id}單元 ${u.title}</div>
+    ${topbar("/units", "這個單元有八關,要一關一關過。先學一學認識新字,再玩聽力、看圖、詞語、句子、朗讀、寫字,最後考一次小考。小考六十分才能去下一個單元。")}
+    <div class="section-title">${u.emoji} 第${u.id}單元 ${esc(u.title)}</div>
     <div class="lesson-list">
       ${LESSONS.map(l => {
-        const s = p[l.key] || 0;
-        return `<div class="lesson-card ${s >= 1 ? "done" : ""}" onclick="A.nav('/unit/${id}/${l.key}')">
-          <span class="l-emoji">${l.emoji}</span>
-          <span class="l-title">${l.title}<div style="font-size:20px;color:#7a6a58;font-weight:normal">${l.desc}</div></span>
-          <span class="l-stars">${"⭐".repeat(s)}${"☆".repeat(3 - s)}</span>
+        const sc = store.lessonScore(id, l.key);
+        const open = store.lessonUnlocked(id, l.key);
+        return `<div class="lesson-card ${sc >= PASS ? "done" : ""} ${open ? "" : "locked"}" onclick="${open ? `A.nav('/unit/${id}/${l.key}')` : "A.lessonLocked()"}">
+          <span class="l-emoji">${open ? l.emoji : "🔒"}</span>
+          <span class="l-title">${l.title}<div style="font-size:20px;color:#7a6a58;font-weight:normal">${sc > 0 ? `${sc} 分` : l.desc}</div></span>
+          <span class="l-stars">${"⭐".repeat(starsOf(sc))}${"☆".repeat(3 - starsOf(sc))}</span>
         </div>`;
       }).join("")}
     </div>
@@ -145,8 +373,9 @@ function viewUnit(id) {
     </div>`).join("")}
   </div>`;
 }
+A.lessonLocked = () => speak("這一關還沒打開喔!先把上面那一關過了,就可以玩了。");
 
-/* ================= 學一學(單元字卡) ================= */
+/* ================= 1 學一學(字卡 + 跟讀) ================= */
 let learnIdx = 0;
 function viewUnitLearn(id) {
   const u = UNIT_BY_ID[id];
@@ -158,14 +387,15 @@ function renderLearnCard(u) {
   const it = u.items[learnIdx];
   const last = learnIdx === u.items.length - 1;
   app.innerHTML = `<div class="screen">
-    ${topbar(`/unit/${u.id}`, "跟著唸一次!看這個字,聽它的聲音和句子。點下一個,學新的字。全部看完,就可以拿星星!")}
+    ${topbar(`/unit/${u.id}`, "看這個字,聽它的聲音。聽完以後,自己也跟著唸一次,聲音大一點沒關係!唸完點下一個。")}
     <div class="learn-card">
       <div class="learn-symbol">${it.w}</div>
       <div class="learn-zy">${it.zy}</div>
       <div class="learn-emoji">${it.e}</div>
-      <div class="learn-word">${esc(it.word)}</div>
+      <div class="learn-word">${esc(it.words.join("、"))}</div>
       <div class="learn-sentence">${esc(it.s)}</div>
     </div>
+    <div class="say-along">🗣️ 換你唸唸看:<b>${it.w}</b>,${esc(it.word)}</div>
     <div class="action-row">
       <button class="action-btn bg-blue" onclick="A.sayItem(${u.id},${learnIdx})">🔊 再聽一次</button>
       <button class="action-btn bg-purple" onclick="A.nav('/write/${it.w}')">✍️ 寫寫看</button>
@@ -186,160 +416,458 @@ A.learnPrev = uid => { const u = UNIT_BY_ID[uid]; learnIdx = (learnIdx - 1 + u.i
 A.learnNext = uid => {
   const u = UNIT_BY_ID[uid];
   if (learnIdx === u.items.length - 1) {
-    const gained = store.setLesson(uid, "learn", 3);
+    store.setLesson(uid, "learn", 100);
     learnIdx = 0;
     finishScreen({
-      stars: 3, title: "全部認識了,太棒了!",
-      sub: `你學會了 ${u.items.length} 個新字!`,
+      stars: 3, title: "全部認識了,太棒了!", sub: `你學會了 ${u.items.length} 個新字!`,
       retry: `/unit/${uid}/learn`, next: `/unit/${uid}/listen`, nextLabel: "🎧 去玩聽聲音",
     });
   } else { learnIdx++; renderLearnCard(u); }
 };
 
-/* ================= 測驗共用 ================= */
-let quiz = null; // { uid, kind, items, qIdx, correct, answer, choices, awaiting }
-function shuffle(a) {
-  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
-  return a;
-}
-function startQuiz(uid, kind) {
+/* ================= 2~5 聽聲音 / 看圖 / 詞語 / 句子 ================= */
+function startUnitQuiz(uid, kind) {
   const u = UNIT_BY_ID[uid];
   const items = shuffle(u.items.slice()).slice(0, 8);
-  quiz = { uid, kind, items, qIdx: -1, correct: 0, awaiting: false };
-  const intro = { listen: "仔細聽,點出你聽到的字!", look: "看圖案,點出對的字!", sentence: "聽句子,把對的字放進空格!" }[kind];
-  speak(intro);
-  setTimeout(nextQ, 2200);
-}
-function nextQ(rerender) {
-  if (!rerender) {
-    quiz.qIdx++;
-    if (quiz.qIdx >= quiz.items.length) return finishQuiz();
-    const it = quiz.items[quiz.qIdx];
-    const wrongs = shuffle(UNIT_BY_ID[quiz.uid].items.filter(x => x.w !== it.w)).slice(0, 2);
-    quiz.choices = shuffle([it, ...wrongs]);
-    quiz.awaiting = true;
-    quiz.firstTry = true;
-  }
-  const u = UNIT_BY_ID[quiz.uid];
-  const it = quiz.items[quiz.qIdx];
-  const progress = quiz.items.map((_, k) => k < quiz.qIdx ? "🟢" : (k === quiz.qIdx ? "🔵" : "⚪")).join(" ");
-  let promptHtml = "";
-  if (quiz.kind === "listen") {
-    promptHtml = `<button class="big-sound-btn" onclick="A.playQ()">🔊</button>`;
-  } else if (quiz.kind === "look") {
-    promptHtml = `<div class="quiz-prompt" onclick="A.playQ()"><div class="qp-emoji">${it.e}</div><div class="qp-text">${esc(it.word)}</div></div>`;
-  } else {
-    const holed = it.s.replace(it.w, `<span class="blank">?</span>`);
-    promptHtml = `<div class="quiz-prompt" onclick="A.playQ()"><div class="qp-text">${holed}</div><div style="font-size:22px;color:#7a6a58;margin-top:8px">🔊 點句子可以再聽一次</div></div>`;
-  }
-  app.innerHTML = `<div class="screen">
-    ${topbar(`/unit/${quiz.uid}`, "先聽聲音或看題目,再從下面三個字裡,點出正確的那一個。答錯沒關係,可以再試!")}
-    <div class="section-title">${u.emoji} ${ {listen:"🎧 聽聲音",look:"🖼️ 看圖選字",sentence:"✏️ 句子填空"}[quiz.kind] }</div>
-    <div class="quiz-progress">${progress}</div>
-    ${promptHtml}
-    <div class="choice-row">
-      ${quiz.choices.map((c, i) => `<button class="choice-btn" id="ch${i}" onclick="A.answer(${i})">${c.w}</button>`).join("")}
-    </div>
-  </div>`;
-  setTimeout(() => A.playQ(), 350);
-}
-A.playQ = () => {
-  const it = quiz.items[quiz.qIdx];
-  if (quiz.kind === "listen") speak(`${it.w}。${it.word}的${it.w}`);
-  else if (quiz.kind === "look") speak(it.word, 0.8);
-  else speak(it.s, 0.8);
-};
-A.answer = i => {
-  if (!quiz.awaiting) return;
-  const it = quiz.items[quiz.qIdx];
-  const btn = document.getElementById("ch" + i);
-  if (quiz.choices[i].w === it.w) {
-    quiz.awaiting = false;
-    if (quiz.firstTry) quiz.correct++;
-    btn.classList.add("correct");
-    bigPop("⭕");
-    praise();
-    setTimeout(() => nextQ(), 1900);
-  } else {
-    quiz.firstTry = false;
-    btn.classList.add("wrong");
-    encourage();
-    setTimeout(() => A.playQ(), 2600);
-  }
-};
-function finishQuiz() {
-  const n = quiz.items.length;
-  const c = quiz.correct;
-  const stars = c >= n ? 3 : c >= n * 0.7 ? 2 : c >= n * 0.5 ? 1 : 0;
-  store.setLesson(quiz.uid, quiz.kind, stars);
-  const order = ["learn", "listen", "look", "sentence", "write"];
-  const nextKey = order[order.indexOf(quiz.kind) + 1];
-  finishScreen({
-    stars,
-    title: stars === 3 ? "全部答對,太厲害了!" : stars >= 1 ? "過關了,好棒!" : "再練習一次,一定可以的!",
-    sub: `答對 ${c} 題(共 ${n} 題)`,
-    retry: `/unit/${quiz.uid}/${quiz.kind}`,
-    next: stars >= 1 && nextKey ? `/unit/${quiz.uid}/${nextKey}` : `/unit/${quiz.uid}`,
-    nextLabel: stars >= 1 && nextKey ? "➡️ 下一關" : "📋 回單元",
+  const l = LESSON_BY_KEY[kind];
+  runQuiz({
+    title: `第${uid}單元 ${l.title}`, emoji: l.emoji, back: `/unit/${uid}`,
+    help: "先聽聲音或看題目,再從下面的字裡,點出正確的那一個。答錯沒關係,可以再試一次!",
+    intro: { listen: "仔細聽,點出你聽到的字!", look: "看圖案,點出對的字!", word: "聽這個詞,把空格補起來!", sentence: "聽句子,把對的字放進空格!" }[kind],
+    questions: items.map(it => makeQuestion(it, kind, u.items)),
+    onFinish: (score, c, n) => finishLesson(uid, kind, score, c, n),
   });
 }
 
-/* ================= 過關畫面 ================= */
-function finishScreen(opt) {
-  const unitId = (location.pathname.match(/\/unit\/(\d+)/) || [])[1];
+/* ================= 6 讀一讀(朗讀短文 + 短文填空) ================= */
+let readState = null;
+function viewUnitRead(id) {
+  const u = UNIT_BY_ID[id];
+  if (!u || !u.story) return nav(`/unit/${id}`);
+  readState = { uid: id, played: false };
+  renderReadStory(u);
+}
+function renderReadStory(u) {
+  const sentences = splitSentences(u.story.text);
   app.innerHTML = `<div class="screen">
-    <div class="topbar"><span></span><span class="star-count">⭐ ${store.data.stars}</span><span></span></div>
-    <div class="result-box">
-      <div class="result-stars">${opt.stars > 0 ? "⭐".repeat(opt.stars) : "💪"}</div>
-      <div class="result-text">${opt.title}</div>
-      <div class="result-sub">${opt.sub || ""}</div>
-      <div class="action-row" style="max-width:480px;margin:0 auto;">
-        <button class="action-btn bg-blue" onclick="A.nav('${opt.retry}')">🔁 再玩一次</button>
-        <button class="action-btn bg-green" onclick="A.nav('${opt.next}')">${opt.nextLabel}</button>
-      </div>
+    ${topbar(`/unit/${u.id}`, "這裡有一篇短短的文章。先點藍色按鈕聽一次,再自己唸出聲音。一句一句慢慢唸,唸完就可以去做填空題。")}
+    <div class="section-title">📢 ${esc(u.story.title)}</div>
+    <div class="story-box">
+      ${sentences.map((s, i) => `<span class="story-line" id="sl${i}" onclick="A.saySentence(${i})">${esc(s)}</span>`).join("")}
+    </div>
+    <div class="say-along">🗣️ 點每一句都可以單獨聽,聽完請跟著唸出聲音</div>
+    <div class="action-row">
+      <button class="action-btn bg-blue" onclick="A.readAll()">🔊 唸給我聽</button>
+      <button class="action-btn bg-green" onclick="A.readDone()">✅ 我唸完了</button>
     </div>
   </div>`;
-  if (opt.stars > 0) { celebrate(); }
-  speak(opt.title + (opt.stars > 0 ? `你得到${opt.stars}顆星星!` : ""), 0.95);
-  // 單元全通 & 新徽章慶祝
-  const newly = store.checkBadges(); store.save();
-  if (unitId && store.unitDone(+unitId) && opt.stars > 0) {
-    setTimeout(() => { confetti(24); speak(`哇!第${unitId}單元全部完成!你真的很棒!`); }, 2600);
-  }
-  if (newly.length) {
-    setTimeout(() => { bigPop("🏅"); speak(`恭喜你得到新徽章:${newly.map(b => b.name).join("、")}!`); }, 4200);
-  }
+  setTimeout(() => A.readAll(), 500);
 }
+A.saySentence = i => {
+  const u = UNIT_BY_ID[readState.uid];
+  const sentences = splitSentences(u.story.text);
+  document.querySelectorAll(".story-line").forEach(el => el.classList.remove("hl"));
+  const el = document.getElementById("sl" + i); if (el) el.classList.add("hl");
+  speak(sentences[i], 0.75);
+};
+A.readAll = () => {
+  const u = UNIT_BY_ID[readState.uid];
+  readState.played = true;
+  speak(u.story.text, 0.72);
+};
+A.readDone = () => {
+  const u = UNIT_BY_ID[readState.uid];
+  const qs = u.cloze.map(c => {
+    const m = shuffleOpts(c.opts, c.a);
+    return {
+      type: "cloze", item: ITEM_BY_CHAR[c.opts[c.a]] || null,
+      say: c.q.replace(BLANK, "空格"), rate: 0.8,
+      promptHtml: `<div class="quiz-prompt" onclick="A.sayQ()"><div class="qp-text">${esc(c.q).replace(BLANK, '<span class="blank">?</span>')}</div>
+        <div class="qp-hint">🔊 點句子可以再聽一次</div></div>`,
+      autoPlay: true, opts: m.opts, a: m.a,
+    };
+  });
+  runQuiz({
+    title: `第${u.id}單元 讀一讀`, emoji: "📢", back: `/unit/${u.id}`,
+    help: "剛才唸過的文章,現在把少掉的字補回去。點出正確的字!",
+    intro: "很好!現在把文章裡少掉的字補回去。",
+    questions: qs,
+    onFinish: (score, c, n) => finishLesson(u.id, "read", score, c, n),
+  });
+};
 
-/* ================= 寫一寫(單元) ================= */
-let writeQueue = [], writeUid = null;
+/* ================= 7 寫一寫(描字 + 聽寫) ================= */
+let writeQueue = [], writeCtx = null;
 function viewUnitWrite(id) {
   const u = UNIT_BY_ID[id];
   if (!u) return nav("/units");
-  writeUid = id;
-  writeQueue = u.items.map(it => it.w);
+  const items = shuffle(u.items.slice());
+  const traceChars = items.slice(0, Math.max(1, items.length - 2)).map(it => it.w);
+  const dictation = items.slice(-2); // 最後兩個字改成聽寫:先聽音選字,再描寫
+  writeCtx = { uid: id, penalty: 0, dictation, dIdx: 0 };
+  writeQueue = traceChars.slice();
   const step = () => {
     writeQueue.shift();
-    if (writeQueue.length === 0) {
-      store.setLesson(id, "write", 3);
-      finishScreen({
-        stars: 3, title: "全部寫完了,好厲害!", sub: `寫了 ${u.items.length} 個字!`,
-        retry: `/unit/${id}/write`, next: `/unit/${id}`, nextLabel: "📋 回單元",
-      });
-    } else openTrace(writeQueue[0], `/unit/${id}`, step);
+    if (writeQueue.length === 0) return startDictation();
+    openTrace(writeQueue[0], `/unit/${id}`, step);
   };
   openTrace(writeQueue[0], `/unit/${id}`, step);
 }
+function startDictation() {
+  const u = UNIT_BY_ID[writeCtx.uid];
+  if (writeCtx.dIdx >= writeCtx.dictation.length) {
+    const score = Math.max(0, 100 - writeCtx.penalty);
+    return finishLesson(writeCtx.uid, "write", score, u.items.length, u.items.length);
+  }
+  const it = writeCtx.dictation[writeCtx.dIdx];
+  const wrongs = distractors(it, u.items, 2);
+  const opts = shuffle([it, ...wrongs]).map(x => x.w);
+  const a = opts.indexOf(it.w);
+  app.innerHTML = `<div class="screen">
+    ${topbar(`/unit/${u.id}`, "這是聽寫。先點喇叭聽一個字,點出正確的字,然後把它寫一次。")}
+    <div class="section-title">✍️ 聽寫:聽聲音,選出這個字</div>
+    <button class="big-sound-btn" onclick="A.sayDict()">🔊</button>
+    <div class="choice-row">
+      ${opts.map((o, i) => `<button class="choice-btn" id="dc${i}" onclick="A.answerDict(${i},${a})">${o}</button>`).join("")}
+    </div>
+  </div>`;
+  setTimeout(() => A.sayDict(), 400);
+}
+A.sayDict = () => { const it = writeCtx.dictation[writeCtx.dIdx]; speak(`${it.w}。${it.word}的${it.w}`); };
+A.answerDict = (i, a) => {
+  const it = writeCtx.dictation[writeCtx.dIdx];
+  const btn = document.getElementById("dc" + i);
+  if (i === a) {
+    btn.classList.add("correct"); bigPop("⭕"); praise(); store.boxHit(it.w);
+    setTimeout(() => {
+      writeQueue = [it.w];
+      openTrace(it.w, `/unit/${writeCtx.uid}`, () => { writeCtx.dIdx++; writeQueue = []; startDictation(); });
+    }, 1700);
+  } else {
+    writeCtx.penalty += 10; store.boxAdd(it.w);
+    btn.classList.add("wrong"); encourage();
+    setTimeout(() => A.sayDict(), 2400);
+  }
+};
+
+/* ================= 8 單元小考 ================= */
+function startUnitTest(uid) {
+  const u = UNIT_BY_ID[uid];
+  const qs = makeMixed(u.items, u.items, [["listen", 2], ["look", 2], ["word", 3], ["sentence", 3]]);
+  runQuiz({
+    title: `第${uid}單元 小考`, emoji: "🏁", back: `/unit/${uid}`,
+    help: "這是單元小考,一共十題。答對六題以上就過關,可以去下一個單元。慢慢來,不用急!",
+    intro: "單元小考開始!一共十題,答對六題就過關。",
+    questions: qs,
+    onFinish: (score, c, n) => finishLesson(uid, "utest", score, c, n),
+  });
+}
+
+/* ================= 總複習關 ================= */
+function startReview(n) {
+  if (!store.reviewUnlocked(n)) { nav("/units"); return A.reviewLocked(); }
+  const recent = [];
+  for (let i = n - 4; i <= n; i++) if (UNIT_BY_ID[i]) recent.push(...UNIT_BY_ID[i].items);
+  const earlier = [];
+  for (let i = 1; i <= n - 5; i++) if (UNIT_BY_ID[i]) earlier.push(...UNIT_BY_ID[i].items);
+  const pool = recent.concat(earlier);
+  const qs = makeMixed(shuffle(recent).slice(0, 10), pool, [["listen", 2], ["look", 2], ["word", 3], ["sentence", 3]]);
+  if (earlier.length) {
+    shuffle(earlier).slice(0, 2).forEach(it => qs.push(makeQuestion(it, pick(["listen", "word", "sentence"]), pool)));
+  }
+  shuffle(qs);
+  runQuiz({
+    title: `總複習(第 ${n - 4} 到 ${n} 單元)`, emoji: "🔁", back: "/units",
+    help: "這是總複習,題目是前面學過的字。答對六成就過關,過關才能繼續往下學新的單元。",
+    intro: "總複習開始!題目都是前面學過的字,慢慢想。",
+    questions: qs,
+    onFinish: (score, c, num) => {
+      store.setReview(n, score);
+      const pass = score >= PASS;
+      finishScreen({
+        stars: starsOf(score),
+        title: pass ? `${score} 分,總複習通過!` : `${score} 分,再複習一次!`,
+        sub: `答對 ${c} 題(共 ${num} 題)`,
+        retry: `/review/${n}`,
+        next: pass ? `/unit/${n + 1}` : `/unit/${n - 4}`,
+        nextLabel: pass ? "➡️ 學新單元" : "📖 回去複習",
+        note: pass ? "" : "沒關係,回去把前面的單元再看一次,再來挑戰!",
+      });
+    },
+  });
+}
+
+/* ================= 季檢定 ================= */
+function startQexam(i) {
+  const e = QEXAM_BY_ID[i];
+  const st = STAGE_BY_ID[i];
+  if (!e) return nav("/units");
+  if (!store.qexamUnlocked(i)) { nav("/units"); return A.qexamLocked(); }
+  runExamLike(e, {
+    title: `第${i}季 季檢定・${st.title}`, emoji: "🎯", back: "/units",
+    help: "這是季檢定,像真的考試一樣自己讀題目。看不懂可以點喇叭聽。六十分就過關,過關才能進下一季。",
+    onFinish: (score, c, n) => {
+      store.setQexam(i, score);
+      const pass = score >= PASS;
+      finishScreen({
+        stars: starsOf(score),
+        title: pass ? `${score} 分,季檢定通過!` : `${score} 分,再加油一次!`,
+        sub: pass ? `第${i}季完成了,你真的很棒!` : `答對 ${c} 題(共 ${n} 題)`,
+        retry: `/qexam/${i}`,
+        next: pass ? (STAGE_BY_ID[i + 1] ? `/unit/${st.units[1] + 1}` : "/exam") : "/units",
+        nextLabel: pass ? (STAGE_BY_ID[i + 1] ? "➡️ 進入下一季" : "🎓 去挑戰模擬考") : "📚 回去複習",
+        extraCelebrate: pass ? `恭喜你完成第${i}季!${STAGE_BY_ID[i + 1] ? "下一季打開了!" : ""}` : null,
+      });
+    },
+  });
+}
+
+/* ================= 模擬考(仿全民中檢初等) ================= */
+function viewExams() {
+  const unlocked = store.examUnlocked();
+  app.innerHTML = `<div class="screen">
+    ${topbar("/", "這裡是檢定挑戰,題目模仿正式的中文檢定考試。通過任何一季的季檢定就可以來考,想考幾次都可以。八十分算通過。")}
+    <div class="section-title">🎓 檢定挑戰</div>
+    <div class="sub-note">${unlocked ? "每回 10 題,80 分以上通過!考幾次都可以。" : "🔒 通過第一季的季檢定,這裡就會打開!"}</div>
+    <div class="lesson-list">
+      ${EXAMS.map(e => {
+        const sc = store.examScore(e.id);
+        return `<div class="lesson-card ${sc >= 80 ? "done" : ""} ${unlocked ? "" : "locked"}"
+          onclick="${unlocked ? `A.nav('/exam/${e.id}')` : "A.examLocked()"}">
+          <span class="l-emoji">${unlocked ? e.emoji : "🔒"}</span>
+          <span class="l-title">${e.title}<div style="font-size:20px;color:#7a6a58;font-weight:normal">${sc ? `${sc} 分` : "選字・聽寫・讀句子"}</div></span>
+          <span class="l-stars">${"⭐".repeat(starsOf(sc))}${"☆".repeat(3 - starsOf(sc))}</span>
+        </div>`;
+      }).join("")}
+    </div>
+    <div class="sub-note" style="margin-top:20px">題型參考全民中文能力檢定(初等),都是原創練習題。<br>三回都考到 80 分,就拿到「檢定小狀元」徽章 🏵️</div>
+  </div>`;
+}
+A.examLocked = () => speak("檢定挑戰還沒打開喔!先通過第一季的季檢定,就可以來考考看了。");
+
+function runExamLike(e, cfg) {
+  const qs = e.questions.map(q => {
+    const isListen = q.t === "聽";
+    const m = shuffleOpts(q.opts, q.a);
+    return {
+      type: "exam", item: null,
+      say: isListen ? q.say : q.q.replace(BLANK, "空格"), rate: isListen ? 1 : 0.8,
+      autoPlay: isListen,
+      promptHtml: isListen
+        ? `<button class="big-sound-btn" onclick="A.sayQ()">🔊</button><div class="sub-note">${esc(q.q)}</div>`
+        : `<div class="quiz-prompt"><div class="qp-text" style="font-size:32px">${esc(q.q).replace(BLANK, '<span class="blank">?</span>')}</div>
+           <div class="qp-hint" onclick="A.sayQ()">🔊 點我聽題目</div></div>`,
+      opts: m.opts, a: m.a,
+    };
+  });
+  runQuiz({
+    title: cfg.title, emoji: cfg.emoji, back: cfg.back, help: cfg.help,
+    intro: "考試開始!慢慢看題目,不會的可以點喇叭聽。",
+    questions: qs, onFinish: cfg.onFinish,
+  });
+}
+function startExam(id) {
+  const e = EXAM_BY_ID[id];
+  if (!e) return nav("/exam");
+  if (!store.examUnlocked()) { viewExams(); return A.examLocked(); }
+  runExamLike(e, {
+    title: e.title, emoji: e.emoji, back: "/exam",
+    help: "像真的考試一樣,自己讀題目,從四個選項裡點出正確答案。看不懂可以點藍色喇叭把題目唸給你聽。",
+    onFinish: (score, c, n) => {
+      store.setExam(id, score);
+      const passed = score >= 80;
+      const nextExam = EXAMS.find(x => store.examScore(x.id) < 80);
+      finishScreen({
+        stars: starsOf(score),
+        title: score === 100 ? "一百分!太厲害了!" : passed ? `${score} 分,通過了!` : `${score} 分,再練習一下!`,
+        sub: passed ? "已經有檢定的實力囉!" : `答對 ${c} 題(共 ${n} 題)`,
+        retry: `/exam/${id}`,
+        next: passed && nextExam ? `/exam/${nextExam.id}` : "/exam",
+        nextLabel: passed && nextExam ? "➡️ 下一回" : "📋 回列表",
+      });
+    },
+  });
+}
+
+/* ================= 每日挑戰(每天換題,永遠有得玩) ================= */
+function startDaily() {
+  const learned = store.learnedChars();
+  if (!learned.length) { nav("/"); return speak("先去識字單元學第一課,每日挑戰就會打開囉!"); }
+  const day = todayStr();
+  const rnd = seededRand("daily-" + day + "-" + learned.length);
+  const items = seededShuffle(learned.slice(), rnd).slice(0, 10);
+  const plan = [["listen", 3], ["look", 2], ["word", 2], ["sentence", 3]];
+  const qs = makeMixed(items, learned, plan, learned.length >= 12 ? 4 : 3, rnd);
+  runQuiz({
+    title: "每日挑戰", emoji: "📅", back: "/",
+    help: "每日挑戰的題目,是從你學過的字裡面出的。每天都不一樣,天天都可以來玩。",
+    intro: "今天的挑戰開始!題目都是你學過的字。",
+    questions: qs,
+    onFinish: (score, c, n) => {
+      store.setDaily(score);
+      finishScreen({
+        stars: starsOf(score),
+        title: score >= 80 ? `${score} 分,今天狀態真好!` : `${score} 分,今天也有進步!`,
+        sub: `答對 ${c} 題(共 ${n} 題)・已完成 ${store.data.dailyCount} 次每日挑戰`,
+        retry: "/daily", retryLabel: "🔁 再玩一次",
+        next: "/", nextLabel: "🏠 回首頁",
+        note: "明天再來,會有新的題目喔!",
+      });
+    },
+  });
+}
+
+/* ================= 闖關塔(無限層,越爬越難) ================= */
+function startTower(floor) {
+  const learned = store.learnedChars();
+  if (!learned.length) { nav("/"); return speak("先去識字單元學第一課,闖關塔就會打開囉!"); }
+  const f = Math.max(1, floor || store.towerBest() + 1);
+  const optCount = f >= 6 && learned.length >= 8 ? 4 : 3;
+  const kinds = f >= 11 ? [["listen", 2], ["word", 2], ["sentence", 2]] :
+                f >= 4 ? [["listen", 2], ["look", 1], ["word", 1], ["sentence", 1]] :
+                         [["listen", 2], ["look", 2], ["word", 1]];
+  const items = shuffle(learned.slice()).slice(0, 8);
+  const qs = makeMixed(items, learned, kinds, optCount);
+  runQuiz({
+    title: `闖關塔 第 ${f} 層`, emoji: "🗼", back: "/tower",
+    help: "闖關塔一層比一層難,答對六成就可以上一層。爬到第幾層都可以,沒有盡頭,想休息隨時可以回家。",
+    intro: `第 ${f} 層,開始!`,
+    questions: qs,
+    onFinish: (score, c, n) => {
+      const pass = score >= PASS;
+      if (pass) store.setTower(f);
+      finishScreen({
+        stars: starsOf(score),
+        title: pass ? `過關!你在第 ${f} 層` : `${score} 分,這一層再試一次!`,
+        sub: `答對 ${c} 題(共 ${n} 題)・最高紀錄 ${store.towerBest()} 層`,
+        retry: `/tower/${f}`, retryLabel: pass ? "🔁 再爬一次這層" : "🔁 再試一次",
+        next: pass ? `/tower/${f + 1}` : "/tower",
+        nextLabel: pass ? `⬆️ 上第 ${f + 1} 層` : "🗼 回闖關塔",
+      });
+    },
+  });
+}
+function viewTower() {
+  const best = store.towerBest();
+  const open = store.practiceOpen();
+  app.innerHTML = `<div class="screen">
+    ${topbar("/", "闖關塔沒有盡頭,一層一層往上爬。題目都是你學過的字,越高層越難。爬累了隨時可以回家休息。")}
+    <div class="section-title">🗼 闖關塔</div>
+    <div class="streak-banner">
+      <div class="fire">🗼</div>
+      <div class="s-text">最高爬到 ${best} 層</div>
+      <div style="font-size:22px;color:#7a6a58">${open ? "題目從你學過的字裡面出,越爬越難" : "先去識字單元學第一課就會打開"}</div>
+    </div>
+    <div class="action-row">
+      <button class="action-btn bg-green" onclick="${open ? `A.nav('/tower/${best + 1}')` : "A.practiceLocked()"}">⬆️ 挑戰第 ${best + 1} 層</button>
+    </div>
+    ${best > 0 ? `<div class="action-row"><button class="action-btn bg-blue" onclick="A.nav('/tower/1')">🔁 從第 1 層重新爬</button></div>` : ""}
+  </div>`;
+}
+A.practiceLocked = () => speak("先去識字單元學第一課,這裡就會打開囉!");
+
+/* ================= 朗讀練習室 ================= */
+function viewReading() {
+  const units = UNITS.filter(u => store.lessonScore(u.id, "learn") >= PASS && u.story);
+  app.innerHTML = `<div class="screen">
+    ${topbar("/", "這裡是朗讀練習室。學過的短文和句子都在這裡,想唸哪一篇就點哪一篇。點了會先唸給你聽,你再跟著唸。")}
+    <div class="section-title">📢 朗讀練習</div>
+    ${units.length === 0 ? `<div class="sub-note">先去識字單元學第一課,這裡就會有文章囉!</div>` : ""}
+    ${units.map(u => `<div class="phrase-card" onclick="A.nav('/reading/${u.id}')">
+      <div class="p-emoji">${u.emoji}</div>
+      <div class="p-text">${esc(u.story.title)}<div style="font-size:20px;color:#7a6a58">第${u.id}單元 ${esc(u.title)}</div></div>
+    </div>`).join("")}
+    ${units.length ? `<div class="section-title" style="margin-top:24px">💬 生活常用句</div>` : ""}
+    ${units.flatMap(u => u.phrases).map(ph => `<div class="phrase-card" onclick="speak('${esc(ph.t)}', 0.75)">
+      <div class="p-emoji">${ph.e}</div><div class="p-text">${esc(ph.t)}</div>
+    </div>`).join("")}
+  </div>`;
+}
+function viewReadingOne(id) {
+  const u = UNIT_BY_ID[id];
+  if (!u || !u.story) return nav("/reading");
+  const sentences = splitSentences(u.story.text);
+  app.innerHTML = `<div class="screen">
+    ${topbar("/reading", "先點藍色按鈕聽一次,再自己唸出聲音。也可以點單獨一句,一句一句慢慢練。")}
+    <div class="section-title">📢 ${esc(u.story.title)}</div>
+    <div class="story-box">
+      ${sentences.map((s, i) => `<span class="story-line" onclick="A.sayOne(${id},${i})" id="rl${i}">${esc(s)}</span>`).join("")}
+    </div>
+    <div class="say-along">🗣️ 唸出聲音,對記憶最有幫助!</div>
+    <div class="action-row">
+      <button class="action-btn bg-blue" onclick="speak(READ_TEXT, 0.72)">🔊 整篇唸給我聽</button>
+      <button class="action-btn bg-green" onclick="A.readPractised(${id})">✅ 我唸完了</button>
+    </div>
+  </div>`;
+  window.READ_TEXT = u.story.text;
+}
+A.sayOne = (id, i) => {
+  const u = UNIT_BY_ID[id];
+  const sentences = splitSentences(u.story.text);
+  document.querySelectorAll(".story-line").forEach(el => el.classList.remove("hl"));
+  const el = document.getElementById("rl" + i); if (el) el.classList.add("hl");
+  speak(sentences[i], 0.75);
+};
+A.readPractised = id => {
+  store.stampToday(); store.data.stars += 1; store.checkBadges(); store.save();
+  confetti(12); applause(1.2); bigPop("👍");
+  speak("唸得很好!多唸幾次,字就會記得更牢。");
+  setTimeout(() => nav("/reading"), 2200);
+};
+
+/* ================= 錯字複習箱 ================= */
+function viewBox() {
+  const list = store.boxList();
+  app.innerHTML = `<div class="screen">
+    ${topbar("/", "這裡放的是你答錯過的字。多練幾次,答對了就會從這裡消失。這是最有效的複習方法!")}
+    <div class="section-title">🔁 錯字複習</div>
+    ${list.length === 0
+      ? `<div class="streak-banner"><div class="fire">🎉</div><div class="s-text">沒有要複習的字!</div>
+         <div style="font-size:22px;color:#7a6a58">你都答對了,真棒!</div></div>`
+      : `<div class="sub-note">有 ${list.length} 個字要多練習</div>
+         <div class="symbol-grid">${list.map(ch => `<button class="symbol-btn" onclick="A.nav('/write/${ch}')">${ch}</button>`).join("")}</div>
+         <div class="action-row"><button class="action-btn bg-green" onclick="A.nav('/box/go')">▶️ 開始複習</button></div>`}
+  </div>`;
+}
+function startBoxQuiz() {
+  const list = store.boxList();
+  if (!list.length) { nav("/box"); return speak("沒有要複習的字,你都答對了!"); }
+  const items = list.map(ch => ITEM_BY_CHAR[ch]).filter(Boolean);
+  const pool = store.learnedChars().length >= 4 ? store.learnedChars() : ALL_ITEMS;
+  const qs = [];
+  items.slice(0, 8).forEach(it => {
+    qs.push(makeQuestion(it, "listen", pool));
+    qs.push(makeQuestion(it, "sentence", pool));
+  });
+  runQuiz({
+    title: "錯字複習", emoji: "🔁", back: "/box",
+    help: "這些是你答錯過的字。每個字會考兩次,答對了就從複習箱拿掉。",
+    intro: "我們把不熟的字再練一次!",
+    questions: shuffle(qs),
+    onFinish: (score, c, n) => {
+      const left = store.boxCount();
+      if (left === 0) store.checkBadges();
+      store.stampToday(); store.save();
+      finishScreen({
+        stars: starsOf(score),
+        title: left === 0 ? "全部複習完了,太棒了!" : `複習完成!還有 ${left} 個字`,
+        sub: `答對 ${c} 題(共 ${n} 題)`,
+        retry: "/box/go", next: "/", nextLabel: "🏠 回首頁",
+      });
+    },
+  });
+}
 
 /* ================= 手寫板(共用) ================= */
-let traceDone = null, traceChar = "", traceBack = "/", hasInk = false, drawing = false, lastX = 0, lastY = 0;
+let traceDone = null, traceChar = "", hasInk = false, drawing = false, lastX = 0, lastY = 0;
 function charInfo(ch) {
-  for (const u of UNITS) for (const it of u.items) if (it.w === ch) return { word: it.word, e: it.e, say: `${ch}。${it.word}的${ch}` };
-  if (SYM[ch]) return { word: SYM[ch].word, e: SYM[ch].emoji, say: `${SYM[ch].sound}。${SYM[ch].word}的${SYM[ch].sound}` };
+  const it = ITEM_BY_CHAR[ch];
+  if (it) return { word: it.word, e: it.e, say: `${ch}。${it.word}的${ch}` };
+  if (typeof SYM !== "undefined" && SYM[ch]) return { word: SYM[ch].word, e: SYM[ch].emoji, say: `${SYM[ch].sound}。${SYM[ch].word}的${SYM[ch].sound}` };
   return { word: ch, e: "✏️", say: ch };
 }
 function openTrace(ch, backPath, onDone) {
-  traceChar = ch; traceBack = backPath; traceDone = onDone || null; hasInk = false;
+  traceChar = ch; traceDone = onDone || null; hasInk = false;
   const info = charInfo(ch);
   const queueNote = writeQueue.length > 1 ? `<div class="sub-note">還有 ${writeQueue.length} 個字要寫</div>` : "";
   app.innerHTML = `<div class="screen">
@@ -363,6 +891,7 @@ function openTrace(ch, backPath, onDone) {
 }
 function setupCanvas() {
   const canvas = document.getElementById("traceCanvas");
+  if (!canvas) return;
   const px = Math.max(260, Math.min(460, window.innerWidth - 40, window.innerHeight - 360));
   const dpr = window.devicePixelRatio || 1;
   canvas.style.height = px + "px";
@@ -434,10 +963,11 @@ function viewWriteMenu() {
   </div>`;
 }
 
-/* ================= 注音總表與學習卡 ================= */
+/* ================= 補充教材:注音總表與學習卡 ================= */
 function viewBpmf() {
   app.innerHTML = `<div class="screen">
-    ${topbar("/", "這裡是所有的注音符號。想學哪一個,就用手指點它,它就會唸給你聽。")}
+    ${topbar("/", "這裡是所有的注音符號,是幫助你學發音的補充教材。想學哪一個,就用手指點它,它就會唸給你聽。")}
+    <div class="sub-note">💡 注音是幫忙學發音的工具,不用先學完也可以去識字單元認字。</div>
     ${BPMF_GROUPS.map(g => `
       <div class="section-title">${g.title}</div>
       <div class="symbol-grid">
@@ -474,12 +1004,12 @@ function viewBpmfCard(z) {
 }
 A.sayBpmf = z => { const s = SYM[z]; speak(`${s.sound}。${s.word}的${s.sound}。${s.word}`); };
 
-/* ================= 注音闖關 ================= */
+/* ================= 補充教材:注音闖關 ================= */
 function viewGames() {
   app.innerHTML = `<div class="screen">
-    ${topbar("/", "選一關來玩!聽聲音,找出正確的注音符號,就可以拿星星。過了一關,下一關才會打開。十關都過了,識字課程就會打開!")}
+    ${topbar("/", "選一關來玩!聽聲音,找出正確的注音符號,就可以拿星星。這是補充教材,想玩就玩,不會影響識字課程。")}
     <div class="section-title">🎧 注音闖關</div>
-    ${store.bpmfDone() ? "" : `<div class="sub-note">十關全過,就打開識字課程!📚</div>`}
+    <div class="sub-note">💡 補充教材,隨時可以玩。十關全過可以拿「注音小老師」徽章 🎓</div>
     <div class="level-grid">
       ${BPMF_LEVELS.map((syms, i) => {
         const stars = store.data.bpmf.levels[i] || 0;
@@ -495,7 +1025,7 @@ function viewGames() {
 }
 A.lockedLevel = () => speak("這一關還沒開喔!先把前面那一關過關,拿到星星,就可以玩了。");
 
-let bq = null; // 注音測驗狀態
+let bq = null;
 function viewBpmfQuiz(levelIdx) {
   if (levelIdx < 0 || levelIdx >= BPMF_LEVELS.length) return nav("/games");
   bq = { level: levelIdx, qIdx: 0, correct: 0, awaiting: false, total: 5 };
@@ -547,9 +1077,6 @@ function finishBpmfQuiz() {
   const prev = store.data.bpmf.levels[bq.level] || 0;
   if (stars > prev) { store.data.stars += stars - prev; store.data.bpmf.levels[bq.level] = stars; }
   store.stampToday(); store.checkBadges(); store.save();
-  if (!wasDone && store.bpmfDone()) {
-    setTimeout(() => { confetti(26); applause(2); speak("哇!注音十關全部過關!識字課程打開了,明天開始學認字囉!"); }, 2800);
-  }
   const hasNext = bq.level + 1 < BPMF_LEVELS.length;
   finishScreen({
     stars,
@@ -558,95 +1085,7 @@ function finishBpmfQuiz() {
     retry: `/games/${bq.level + 1}`,
     next: stars >= 1 && hasNext ? `/games/${bq.level + 2}` : "/games",
     nextLabel: stars >= 1 && hasNext ? "➡️ 下一關" : "📋 回關卡",
-  });
-}
-
-/* ================= 檢定挑戰(仿全民中檢初等題型) ================= */
-function viewExams() {
-  const unlocked = store.allUnitsDone();
-  app.innerHTML = `<div class="screen">
-    ${topbar("/", "這裡是檢定挑戰,題目模仿正式的中文檢定考試。把十個識字單元都完成,就可以開始挑戰。每回十題,答對八題以上就算通過!")}
-    <div class="section-title">🎓 檢定挑戰</div>
-    <div class="sub-note">${unlocked ? "每回 10 題,80 分以上通過!" : "🔒 先完成全部識字單元,就會打開囉!"}</div>
-    <div class="lesson-list">
-      ${EXAMS.map(e => {
-        const s = store.examStars(e.id);
-        return `<div class="lesson-card ${s >= 2 ? "done" : ""} ${unlocked ? "" : "locked-card"}" style="${unlocked ? "" : "opacity:.55"}"
-          onclick="${unlocked ? `A.nav('/exam/${e.id}')` : "A.examLocked()"}">
-          <span class="l-emoji">${unlocked ? e.emoji : "🔒"}</span>
-          <span class="l-title">${e.title}<div style="font-size:20px;color:#7a6a58;font-weight:normal">選字・聽寫・讀句子</div></span>
-          <span class="l-stars">${"⭐".repeat(s)}${"☆".repeat(3 - s)}</span>
-        </div>`;
-      }).join("")}
-    </div>
-    <div class="sub-note" style="margin-top:20px">題型參考全民中文能力檢定(初等),都是原創練習題。<br>三回都考到 80 分,就拿到「檢定小狀元」徽章 🏆</div>
-  </div>`;
-}
-A.examLocked = () => speak("檢定挑戰還沒打開喔!先把十個識字單元都完成,就可以來考考看了。");
-
-let ex = null; // 考試狀態
-function startExam(id) {
-  const e = EXAM_BY_ID[id];
-  if (!e) return nav("/exam");
-  if (!store.allUnitsDone()) { viewExams(); A.examLocked(); return; }
-  ex = { exam: e, qIdx: -1, correct: 0, awaiting: false };
-  speak("檢定開始!慢慢看題目,不會的可以點喇叭聽。答對八題以上就通過!");
-  setTimeout(nextExamQ, 2600);
-}
-function nextExamQ() {
-  ex.qIdx++;
-  if (ex.qIdx >= ex.exam.questions.length) return finishExam();
-  const q = ex.exam.questions[ex.qIdx];
-  ex.awaiting = true; ex.firstTry = true;
-  const progress = ex.exam.questions.map((_, k) => k < ex.qIdx ? "🟢" : (k === ex.qIdx ? "🔵" : "⚪")).join(" ");
-  const isListen = q.t === "聽";
-  app.innerHTML = `<div class="screen">
-    ${topbar("/exam", "像真的考試一樣,自己讀題目,從四個選項裡點出正確答案。看不懂可以點藍色喇叭,把題目唸給你聽。")}
-    <div class="section-title">${ex.exam.emoji} ${ex.exam.title}</div>
-    <div class="quiz-progress">${progress}</div>
-    ${isListen
-      ? `<button class="big-sound-btn" onclick="A.playE()">🔊</button>
-         <div class="sub-note">${esc(q.q)}</div>`
-      : `<div class="quiz-prompt"><div class="qp-text" style="font-size:32px">${esc(q.q).replace(/（\s*）|（　+）|\(　*\)/g, '<span class="blank">?</span>')}</div>
-         <div style="font-size:22px;color:#7a6a58;margin-top:8px" onclick="A.playE()">🔊 點我聽題目</div></div>`}
-    <div class="choice-row" style="grid-template-columns:repeat(2,1fr)">
-      ${q.opts.map((o, i) => `<button class="choice-btn" id="ex${i}" style="font-size:${o.length > 4 ? 28 : 44}px;padding:22px 6px" onclick="A.answerE(${i})">${esc(o)}</button>`).join("")}
-    </div>
-  </div>`;
-  if (isListen) setTimeout(() => A.playE(), 350);
-}
-A.playE = () => {
-  const q = ex.exam.questions[ex.qIdx];
-  if (q.t === "聽") speak(q.say);
-  else speak(q.q.replace(/（\s*）|（　+）|\(　*\)/g, "空格"), 0.8);
-};
-A.answerE = i => {
-  if (!ex.awaiting) return;
-  const q = ex.exam.questions[ex.qIdx];
-  const btn = document.getElementById("ex" + i);
-  if (i === q.a) {
-    ex.awaiting = false;
-    if (ex.firstTry) ex.correct++;
-    btn.classList.add("correct"); bigPop("⭕"); praise();
-    setTimeout(() => nextExamQ(), 1900);
-  } else {
-    ex.firstTry = false;
-    btn.classList.add("wrong"); encourage();
-  }
-};
-function finishExam() {
-  const score = ex.correct * 10;
-  const stars = score >= 100 ? 3 : score >= 80 ? 2 : score >= 60 ? 1 : 0;
-  store.setExam(ex.exam.id, stars);
-  const passed = score >= 80;
-  const nextExam = EXAMS.find(e => store.examStars(e.id) < 2);
-  finishScreen({
-    stars,
-    title: score === 100 ? "一百分!太厲害了!" : passed ? `${score} 分,通過了!` : `${score} 分,再練習一下!`,
-    sub: passed ? "已經有檢定的實力囉!" : "回去複習單元,再來挑戰!",
-    retry: `/exam/${ex.exam.id}`,
-    next: passed && nextExam ? `/exam/${nextExam.id}` : "/exam",
-    nextLabel: passed && nextExam ? "➡️ 下一回" : "📋 回列表",
+    extraCelebrate: !wasDone && store.bpmfDone() ? "哇!注音十關全部過關!你是注音小老師!" : null,
   });
 }
 
@@ -666,12 +1105,11 @@ function viewRewards() {
       <div>${d}</div>${stamped ? '<div class="stamp">🌟</div>' : ""}
     </div>`;
   }
-  const streak = store.streakNow();
   app.innerHTML = `<div class="screen">
     ${topbar("/", "這裡是你的獎勵!上面是連續學習的天數,中間的月曆,每天有學習就會蓋一個星星章。下面是你得到的徽章。")}
     <div class="streak-banner">
       <div class="fire">🔥</div>
-      <div class="s-text">連續學習 ${streak} 天</div>
+      <div class="s-text">連續學習 ${store.streakNow()} 天</div>
       <div style="font-size:22px;color:#7a6a58">認識 ${store.knownChars()} 個字・⭐ ${store.data.stars} 顆星星</div>
     </div>
     <div class="section-title">📅 ${m + 1} 月學習月曆</div>
@@ -723,18 +1161,36 @@ function render() {
   let m;
   if (p === "/" || p === "") return viewHome();
   if (p === "/units") return viewUnits();
-  if ((m = p.match(/^\/unit\/(\d+)\/learn$/))) return viewUnitLearn(+m[1]);
-  if ((m = p.match(/^\/unit\/(\d+)\/(listen|look|sentence)$/))) { const u = UNIT_BY_ID[+m[1]]; if (!u) return nav("/units"); return startQuiz(+m[1], m[2]); }
-  if ((m = p.match(/^\/unit\/(\d+)\/write$/))) return viewUnitWrite(+m[1]);
+  if ((m = p.match(/^\/unit\/(\d+)\/([a-z]+)$/))) {
+    const id = +m[1], key = m[2];
+    const u = UNIT_BY_ID[id];
+    if (!u || !LESSON_BY_KEY[key]) return nav("/units");
+    if (!store.unitUnlocked(id)) { nav("/units"); return A.lockedMsg(id); }
+    if (!store.lessonUnlocked(id, key)) { viewUnit(id); return A.lessonLocked(); }
+    if (key === "learn") return viewUnitLearn(id);
+    if (key === "read") return viewUnitRead(id);
+    if (key === "write") return viewUnitWrite(id);
+    if (key === "utest") return startUnitTest(id);
+    return startUnitQuiz(id, key);
+  }
   if ((m = p.match(/^\/unit\/(\d+)$/))) return viewUnit(+m[1]);
+  if ((m = p.match(/^\/review\/(\d+)$/))) return startReview(+m[1]);
+  if ((m = p.match(/^\/qexam\/(\d+)$/))) return startQexam(+m[1]);
+  if (p === "/exam") return viewExams();
+  if ((m = p.match(/^\/exam\/(\d+)$/))) return startExam(+m[1]);
+  if (p === "/daily") return startDaily();
+  if (p === "/tower") return viewTower();
+  if ((m = p.match(/^\/tower\/(\d+)$/))) return startTower(+m[1]);
+  if (p === "/reading") return viewReading();
+  if ((m = p.match(/^\/reading\/(\d+)$/))) return viewReadingOne(+m[1]);
+  if (p === "/box") return viewBox();
+  if (p === "/box/go") return startBoxQuiz();
   if (p === "/bpmf") return viewBpmf();
   if ((m = p.match(/^\/bpmf\/(.+)$/))) return viewBpmfCard(m[1]);
   if (p === "/games") return viewGames();
   if ((m = p.match(/^\/games\/(\d+)$/))) return viewBpmfQuiz(+m[1] - 1);
   if (p === "/write") return viewWriteMenu();
   if ((m = p.match(/^\/write\/(.+)$/))) { writeQueue = []; return openTrace(m[1], "/write", null); }
-  if (p === "/exam") return viewExams();
-  if ((m = p.match(/^\/exam\/(\d+)$/))) return startExam(+m[1]);
   if (p === "/rewards") return viewRewards();
   if (p === "/settings") return viewSettings();
   viewHome();
