@@ -26,7 +26,7 @@ const SYMBOLS = [
   { z:"ㄩ", sound:"迂", word:"魚",   emoji:"🐟" },
   { z:"ㄚ", sound:"啊", word:"阿嬤", emoji:"👵" },
   { z:"ㄛ", sound:"喔", word:"公雞喔喔叫", emoji:"🐓" },
-  { z:"ㄜ", sound:"婀", word:"鵝",   emoji:"🦢" },
+  { z:"ㄜ", sound:"鵝", word:"鵝",   emoji:"🦢" },
   { z:"ㄝ", sound:"耶", word:"爺爺", emoji:"👴" },
   { z:"ㄞ", sound:"哀", word:"愛心", emoji:"❤️" },
   { z:"ㄟ", sound:"欸", word:"杯子", emoji:"🥤" },
@@ -35,7 +35,7 @@ const SYMBOLS = [
   { z:"ㄢ", sound:"安", word:"平安", emoji:"🙏" },
   { z:"ㄣ", sound:"恩", word:"門",   emoji:"🚪" },
   { z:"ㄤ", sound:"骯", word:"糖果", emoji:"🍬" },
-  { z:"ㄥ", sound:"燈的韻母鞥", word:"燈", emoji:"💡" },
+  { z:"ㄥ", sound:"燈的尾音", word:"燈", emoji:"💡" },
   { z:"ㄦ", sound:"兒", word:"耳朵", emoji:"👂" },
 ];
 const SYM = Object.fromEntries(SYMBOLS.map(s => [s.z, s]));

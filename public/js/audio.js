@@ -1,10 +1,15 @@
 // 語音(台灣中文)+ 音效(拍手、叮咚)
 let twVoice = null;
 function pickVoice() {
-  const voices = speechSynthesis.getVoices();
-  twVoice = voices.find(v => v.lang === "zh-TW")
-         || voices.find(v => v.lang && v.lang.startsWith("zh"))
-         || null;
+  // 優先挑品質好的語音:Google 線上語音 > 自然語音(Natural/Online) > 台灣地區 > 其他中文
+  const voices = speechSynthesis.getVoices().filter(v => v.lang && v.lang.replace("_", "-").startsWith("zh"));
+  const score = v =>
+    (/Google/i.test(v.name) ? 8 : 0) +
+    (/Natural|Online|Neural/i.test(v.name) ? 4 : 0) +
+    (v.lang.replace("_", "-") === "zh-TW" ? 2 : 0) +
+    (/HsiaoChen|HanHan|Yating|Zhiwei/i.test(v.name) ? 1 : 0);
+  voices.sort((a, b) => score(b) - score(a));
+  twVoice = voices[0] || null;
 }
 if ("speechSynthesis" in window) {
   pickVoice();
