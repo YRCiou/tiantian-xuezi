@@ -305,3 +305,4 @@ canvas#traceCanvas {
 .story-line { cursor: pointer; border-radius: 10px; padding: 2px 0; }
 .story-line:active, .story-line.hl { background: var(--gold); }
 .qp-hint { font-size: 22px; color: #7a6a58; margin-top: 8px; }
+.write-big { font-size: 96px; font-weight: 900; color: var(--primary); line-height: 1.1; margin: 4px 0 8px; }

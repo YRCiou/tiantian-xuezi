@@ -398,7 +398,7 @@ function renderLearnCard(u) {
     <div class="say-along">🗣️ 換你唸唸看:<b>${it.w}</b>,${esc(it.word)}</div>
     <div class="action-row">
       <button class="action-btn bg-blue" onclick="A.sayItem(${u.id},${learnIdx})">🔊 再聽一次</button>
-      <button class="action-btn bg-purple" onclick="A.nav('/write/${it.w}')">✍️ 寫寫看</button>
+      <button class="action-btn bg-purple" onclick="A.writeFromLearn(${u.id},${learnIdx})">✍️ 寫寫看</button>
     </div>
     <div class="nav-row">
       <button class="nav-btn" onclick="A.learnPrev(${u.id})">⏮️ 上一個</button>
@@ -817,6 +817,7 @@ A.readPractised = id => {
 
 /* ================= 錯字複習箱 ================= */
 function viewBox() {
+  traceReturn = "/box";
   const list = store.boxList();
   app.innerHTML = `<div class="screen">
     ${topbar("/", "這裡放的是你答錯過的字。多練幾次,答對了就會從這裡消失。這是最有效的複習方法!")}
@@ -860,6 +861,31 @@ function startBoxQuiz() {
 
 /* ================= 手寫板(共用) ================= */
 let traceDone = null, traceChar = "", hasInk = false, drawing = false, lastX = 0, lastY = 0;
+let traceReturn = null;   // 從哪個畫面點進來的(決定 ⬅️ 回哪裡)
+let traceMask = null;     // 範本字的格點遮罩,用來算描寫覆蓋率
+const TRACE_GRID = 30;    // 覆蓋率用的格數(格子太小會太嚴格,長輩會挫折)
+
+// 從字回推「下一個要學的東西」:同單元的下一個字 → 它的學一學頁面
+function nextTraceTarget(ch) {
+  const uid = UNIT_OF_CHAR[ch];
+  if (uid && UNIT_BY_ID[uid]) {
+    const u = UNIT_BY_ID[uid];
+    const i = u.items.findIndex(it => it.w === ch);
+    if (i >= 0 && i < u.items.length - 1) {
+      return { path: `/unit/${uid}/learn`, idx: i + 1, label: `➡️ 下一個字:${u.items[i + 1].w}` };
+    }
+    return { path: `/unit/${uid}`, idx: -1, label: "📋 回單元" };
+  }
+  if (typeof SYM !== "undefined" && SYM[ch]) {
+    const i = SYMBOLS.findIndex(s => s.z === ch);
+    const nz = SYMBOLS[(i + 1) % SYMBOLS.length].z;
+    return { path: `/bpmf/${nz}`, idx: -1, label: `➡️ 下一個:${nz}` };
+  }
+  return { path: "/write", idx: -1, label: "📋 回去選字" };
+}
+A.traceNext = (path, idx) => { if (idx >= 0) learnIdx = idx; nav(path); };
+A.writeFromLearn = (uid, i) => { traceReturn = `/unit/${uid}/learn`; learnIdx = i; nav(`/write/${UNIT_BY_ID[uid].items[i].w}`); };
+A.writeFromBpmf = z => { traceReturn = `/bpmf/${z}`; nav(`/write/${z}`); };
 function charInfo(ch) {
   const it = ITEM_BY_CHAR[ch];
   if (it) return { word: it.word, e: it.e, say: `${ch}。${it.word}的${ch}` };
@@ -928,26 +954,114 @@ function drawTemplate() {
   ctx.font = `900 ${Math.min(w, h) * 0.72}px "Microsoft JhengHei", sans-serif`;
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText(traceChar, w / 2, h / 2 + Math.min(w, h) * 0.03);
+  buildTraceMask(w, h);
   hasInk = false;
+}
+// 把範本字單獨畫到離螢幕的畫布,記下它蓋到哪些格子(不含中間的十字虛線)
+function buildTraceMask(w, h) {
+  try {
+    const off = document.createElement("canvas");
+    off.width = w; off.height = h;
+    const c = off.getContext("2d");
+    c.fillStyle = "#000";
+    c.font = `900 ${Math.min(w, h) * 0.72}px "Microsoft JhengHei", sans-serif`;
+    c.textAlign = "center"; c.textBaseline = "middle";
+    c.fillText(traceChar, w / 2, h / 2 + Math.min(w, h) * 0.03);
+    const d = c.getImageData(0, 0, w, h).data;
+    const cw = w / TRACE_GRID, chh = h / TRACE_GRID;
+    const cells = new Uint8Array(TRACE_GRID * TRACE_GRID);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (d[(y * w + x) * 4 + 3] > 40) cells[Math.floor(y / chh) * TRACE_GRID + Math.floor(x / cw)] = 1;
+      }
+    }
+    traceMask = cells;
+  } catch (e) { traceMask = null; } // 讀不到像素就退回只看有沒有寫
+}
+// 算「描到多少範本字」:格子有筆跡才算數
+function traceCoverage() {
+  const canvas = document.getElementById("traceCanvas");
+  if (!canvas || !traceMask) return 1;
+  try {
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.round(canvas.width / dpr), h = Math.round(canvas.height / dpr);
+    const d = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+    const cw = canvas.width / TRACE_GRID, chh = canvas.height / TRACE_GRID;
+    const ink = new Uint8Array(TRACE_GRID * TRACE_GRID);
+    for (let y = 0; y < canvas.height; y += 2) {
+      for (let x = 0; x < canvas.width; x += 2) {
+        const i = (y * canvas.width + x) * 4;
+        // 筆跡是橘色 #E86A33,範本與格線是灰色,用紅藍差距分辨
+        if (d[i] - d[i + 2] > 50 && d[i + 3] > 60) ink[Math.floor(y / chh) * TRACE_GRID + Math.floor(x / cw)] = 1;
+      }
+    }
+    let need = 0, got = 0;
+    for (let i = 0; i < traceMask.length; i++) {
+      if (!traceMask[i]) continue;
+      need++;
+      if (ink[i]) got++;
+      else {
+        // 旁邊一格有筆跡也算(長輩手會抖,不要太嚴格)
+        const r = Math.floor(i / TRACE_GRID), c = i % TRACE_GRID;
+        let near = false;
+        for (let dr = -1; dr <= 1 && !near; dr++) for (let dc = -1; dc <= 1; dc++) {
+          const rr = r + dr, cc = c + dc;
+          if (rr >= 0 && rr < TRACE_GRID && cc >= 0 && cc < TRACE_GRID && ink[rr * TRACE_GRID + cc]) { near = true; break; }
+        }
+        if (near) got++;
+      }
+    }
+    return need ? got / need : 1;
+  } catch (e) { return 1; }
 }
 A.clearTrace = () => { drawTemplate(); speak("擦乾淨了,再寫一次!"); };
 A.finishTrace = () => {
   if (!hasInk) { speak("還沒寫喔!用手指照著灰色的字描寫看看。"); return; }
+  const cover = traceCoverage();
+  const ok = cover >= 0.6;
   const first = !store.data.bpmf.practiced[traceChar];
   store.data.bpmf.practiced[traceChar] = (store.data.bpmf.practiced[traceChar] || 0) + 1;
   if (first) store.data.stars += 1;
   store.stampToday(); store.save();
-  confetti(12); applause(1.2); bigPop("👍");
-  if (traceDone) { setTimeout(() => traceDone(), 1400); }
-  else {
-    speak(first ? "寫得真好!你得到一顆星星!" : "寫得越來越漂亮了,真棒!");
-    setTimeout(() => drawTemplate(), 1400);
+  if (traceDone) { // 單元「寫一寫」的排隊流程:照舊自動接下一個字
+    confetti(12); applause(1.2); bigPop("👍");
+    setTimeout(() => traceDone(), 1400);
+    return;
   }
+  if (ok) { confetti(12); applause(1.2); bigPop("👍"); }
+  else bigPop("💪");
+  traceResult(cover, ok, first);
 };
+// 描完的結果畫面:寫到六成以上就給「下一個字」,直接接到下一個字的學一學
+function traceResult(cover, ok, first) {
+  const ch = traceChar;
+  const t = nextTraceTarget(ch);
+  const pct = Math.round(cover * 100);
+  app.innerHTML = `<div class="screen">
+    <div class="topbar"><span></span><span class="star-count">⭐ ${store.data.stars}</span><span></span></div>
+    <div class="result-box">
+      <div class="result-stars">${ok ? "⭐" : "💪"}</div>
+      <div class="write-big">${ch}</div>
+      <div class="result-text">${ok ? (first ? "寫得真好!得到一顆星星!" : "寫得越來越漂亮了!") : "有些地方還沒描到"}</div>
+      <div class="result-sub">描到了 ${pct} 分的字${ok ? "" : ",再描一次會更好"}</div>
+      <div class="action-row" style="max-width:480px;margin:0 auto;">
+        <button class="action-btn ${ok ? "bg-blue" : "bg-orange"}" onclick="A.nav('/write/${ch}')">🔁 再寫一次</button>
+        <button class="action-btn ${ok ? "bg-green" : "bg-blue"}" onclick="A.traceNext('${t.path}',${t.idx})">${t.label}</button>
+      </div>
+      ${ok ? "" : `<div class="sub-note" style="margin-top:14px">沒關係,想繼續也可以按右邊的按鈕。</div>`}
+    </div>
+  </div>`;
+  speak(ok
+    ? (first ? `寫得真好!你得到一顆星星!` : `${ch}寫得越來越漂亮了!`)
+    : `不錯喔!有些地方還沒描到,想再寫一次就按左邊,想學下一個就按右邊。`, 0.95);
+  const newly = store.checkBadges(); store.save();
+  if (newly.length) setTimeout(() => { bigPop("🏅"); speak(`恭喜你得到新徽章:${newly.map(b => b.name).join("、")}!`); }, 3200);
+}
 window.addEventListener("resize", () => { if (document.getElementById("traceCanvas")) setupCanvas(); });
 
 /* ================= 手寫選字 ================= */
 function viewWriteMenu() {
+  traceReturn = null; // 從這裡點進去的字,⬅️ 要回到這個選單
   const chars = [];
   UNITS.forEach(u => { if (store.unitUnlocked(u.id)) u.items.forEach(it => { if (!chars.includes(it.w)) chars.push(it.w); }); });
   app.innerHTML = `<div class="screen">
@@ -993,7 +1107,7 @@ function viewBpmfCard(z) {
     </div>
     <div class="action-row">
       <button class="action-btn bg-blue" onclick="A.sayBpmf('${s.z}')">🔊 再聽一次</button>
-      <button class="action-btn bg-purple" onclick="A.nav('/write/${s.z}')">✍️ 寫寫看</button>
+      <button class="action-btn bg-purple" onclick="A.writeFromBpmf('${s.z}')">✍️ 寫寫看</button>
     </div>
     <div class="nav-row">
       <button class="nav-btn" onclick="A.nav('/bpmf/${prev}')">⏮️ 上一個</button>
@@ -1190,7 +1304,7 @@ function render() {
   if (p === "/games") return viewGames();
   if ((m = p.match(/^\/games\/(\d+)$/))) return viewBpmfQuiz(+m[1] - 1);
   if (p === "/write") return viewWriteMenu();
-  if ((m = p.match(/^\/write\/(.+)$/))) { writeQueue = []; return openTrace(m[1], "/write", null); }
+  if ((m = p.match(/^\/write\/(.+)$/))) { writeQueue = []; return openTrace(m[1], traceReturn || "/write", null); }
   if (p === "/rewards") return viewRewards();
   if (p === "/settings") return viewSettings();
   viewHome();
