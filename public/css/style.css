@@ -228,11 +228,12 @@ canvas#traceCanvas {
 }
 .streak-banner .fire { font-size: 60px; }
 .streak-banner .s-text { font-size: 30px; font-weight: 900; }
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 18px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin-bottom: 18px; }
 .cal-head { text-align: center; font-size: 20px; font-weight: 900; color: #7a6a58; padding: 4px 0; }
 .cal-day {
   aspect-ratio: 1; background: var(--card); border: 3px solid var(--gray-light); border-radius: 14px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 18px;
+  min-width: 0; min-height: 0; overflow: hidden; line-height: 1.15;
 }
 .cal-day.stamped { border-color: var(--gold); background: #FFF3D6; }
 .cal-day.today { border-color: var(--blue); border-width: 4px; }
@@ -306,3 +307,136 @@ canvas#traceCanvas {
 .story-line:active, .story-line.hl { background: var(--gold); }
 .qp-hint { font-size: 22px; color: #7a6a58; margin-top: 8px; }
 .write-big { font-size: 96px; font-weight: 900; color: var(--primary); line-height: 1.1; margin: 4px 0 8px; }
+
+/* ===== 3.0 遊戲感改版 ===== */
+:root {
+  --outline: #4A3423;
+  --green-dark: #2C6A35;
+  --gold-dark: #B8860B;
+  --purple-dark: #55336F;
+  --gray-dark: #9A8D7D;
+  --lip-soft: #DECDB4;
+}
+/* 整頁像一張桌遊板:暖色天空,固定不捲動 */
+body {
+  background:
+    radial-gradient(circle at 15% 10%, rgba(255,255,255,.75) 0 42px, transparent 48px),
+    radial-gradient(circle at 82% 6%, rgba(255,255,255,.6) 0 30px, transparent 36px),
+    linear-gradient(180deg, #FFE9C9 0%, #FFF8EC 42%, #F6EFDC 100%);
+  background-attachment: fixed;
+}
+
+/* 積木唇:按鈕下面一條實心深色邊,按下去會陷進板子裡 */
+.menu-card, .hero-card, .unit-card, .lesson-card, .phrase-card,
+.action-btn, .nav-btn, .choice-btn, .symbol-btn, .level-btn,
+.btn-back, .btn-help, .stat-box, .cal-day, .badge-card {
+  box-shadow: 0 6px 0 var(--lip, var(--lip-soft));
+}
+.menu-card, .hero-card, .unit-card, .lesson-card, .phrase-card,
+.action-btn, .nav-btn, .choice-btn, .symbol-btn, .level-btn,
+.btn-back, .btn-help {
+  transition: transform .1s ease, box-shadow .1s ease;
+}
+.menu-card:active, .hero-card:active, .unit-card:active, .lesson-card:active,
+.phrase-card:active, .action-btn:active, .nav-btn:active, .choice-btn:active,
+.symbol-btn:active, .level-btn:active, .btn-back:active, .btn-help:active {
+  transform: translateY(6px);
+  box-shadow: 0 0 0 var(--lip, var(--lip-soft));
+}
+.big-sound-btn:active { transform: translateY(8px); box-shadow: 0 0 0 var(--blue-dark); }
+
+/* 每種顏色的卡,唇用自己的深色 */
+.bg-green { --lip: var(--green-dark); } .bg-blue { --lip: var(--blue-dark); }
+.bg-purple { --lip: var(--purple-dark); } .bg-orange { --lip: var(--primary-dark); }
+.bg-gray { --lip: var(--gray-dark); }
+.menu-card.c1 { --lip: var(--primary-dark); } .menu-card.c2 { --lip: var(--green-dark); }
+.menu-card.c3 { --lip: var(--blue-dark); } .menu-card.c4 { --lip: var(--purple-dark); }
+.menu-card.c5 { --lip: var(--gold-dark); }
+.hero-card { --lip: var(--gold-dark); }
+.unit-card { --lip: var(--green-dark); }
+.unit-card.review-card { --lip: var(--blue-dark); }
+.unit-card.qexam-card { --lip: var(--gold-dark); }
+.unit-card.locked, .lesson-card.locked, .level-btn.locked { --lip: var(--lip-soft); }
+.lesson-card { --lip: var(--blue-dark); }
+.lesson-card.done { --lip: var(--green-dark); }
+.phrase-card { --lip: var(--gold-dark); }
+.choice-btn, .symbol-btn { --lip: var(--primary-dark); }
+.level-btn { --lip: var(--blue-dark); }
+.btn-back, .nav-btn { --lip: var(--gray-dark); }
+.btn-help { --lip: var(--blue-dark); }
+
+/* 標題一字一跳 */
+.home-title span { display: inline-block; animation: titlepop 2.6s ease-in-out infinite; }
+@keyframes titlepop { 0%,100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-7px) rotate(-3deg); } }
+
+/* 我的識字之路:四季是地圖上的四站 */
+.quest-map {
+  position: relative; background: #EAF6E2; border: 4px solid var(--green);
+  border-radius: 26px; padding: 14px 8px 12px; margin-bottom: 18px;
+  box-shadow: 0 6px 0 var(--green-dark); overflow: hidden;
+}
+.quest-map .qm-label { text-align: center; font-size: 24px; font-weight: 900; color: var(--green); margin-bottom: 2px; }
+.qm-path { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.qm-path path { fill: none; stroke: #fff; stroke-width: 5; stroke-dasharray: 2 16; stroke-linecap: round; animation: pathdash 2.6s linear infinite; }
+@keyframes pathdash { to { stroke-dashoffset: -18; } }
+.qm-row { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding-top: 4px; }
+.qm-station {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: none; border: none; cursor: pointer; font-family: inherit; padding: 14px 2px 6px;
+}
+.qm-mound { font-size: 50px; line-height: 1.05; animation: moundbob 4.4s ease-in-out infinite; }
+.qm-station:nth-child(2) .qm-mound { animation-delay: -1.2s; }
+.qm-station:nth-child(3) .qm-mound { animation-delay: -2.3s; }
+.qm-station:nth-child(4) .qm-mound { animation-delay: -3.1s; }
+@keyframes moundbob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+.qm-plaque {
+  background: var(--card); border: 3px solid var(--outline); border-radius: 999px;
+  box-shadow: 0 4px 0 var(--outline); padding: 4px 10px; text-align: center;
+  font-weight: 900; font-size: 18px; line-height: 1.25; color: var(--ink);
+  transition: transform .1s ease, box-shadow .1s ease; max-width: 100%;
+}
+.qm-station:active .qm-plaque { transform: translateY(4px); box-shadow: 0 0 0 var(--outline); }
+.qm-plaque small { display: block; font-weight: 700; font-size: 13px; color: #8a7a64; white-space: nowrap; }
+.qm-station.done .qm-plaque { background: var(--gold); }
+.qm-station.locked { opacity: .55; }
+.qm-walker { position: absolute; top: -6px; left: 50%; transform: translateX(-50%); font-size: 28px; z-index: 2; animation: moundbob 3s ease-in-out infinite; }
+.qm-sash {
+  position: absolute; top: 4px; right: -2px; z-index: 2; transform: rotate(7deg);
+  background: var(--primary-dark); color: #fff; font-size: 13px; font-weight: 900;
+  border: 2px solid var(--outline); border-radius: 6px; padding: 1px 7px;
+  box-shadow: 0 2px 0 var(--outline);
+}
+
+/* 完成封條:蓋在做完的單元/複習/檢定卡右上角 */
+.unit-card { position: relative; }
+.unit-card.finished::after {
+  content: "已完成"; position: absolute; top: -10px; right: 10px; transform: rotate(6deg);
+  background: var(--primary-dark); color: #fff; font-size: 16px; font-weight: 900;
+  border: 2px solid var(--outline); border-radius: 6px; padding: 2px 10px;
+  box-shadow: 0 2px 0 var(--outline);
+}
+
+/* 徽章變獎牌:拿到的是金幣,沒拿到的是灰影 */
+.badge-card .b-emoji {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 74px; height: 74px; border-radius: 50%;
+  background: var(--gray-light); border: 3px solid var(--gray);
+}
+.badge-card.earned .b-emoji {
+  background: radial-gradient(circle at 32% 28%, #FFE79A 0 30%, var(--gold) 72%);
+  border-color: var(--gold-dark); box-shadow: 0 3px 0 #8A6508;
+}
+
+/* 角落的小生命(只出現在首頁,不擋任何操作) */
+.sky-decor { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+.sky-decor .cloud { position: absolute; font-size: 40px; opacity: .5; animation: clouddrift linear infinite; }
+@keyframes clouddrift { from { transform: translateX(-80px); } to { transform: translateX(110vw); } }
+.sky-decor .bird { position: absolute; font-size: 24px; opacity: .75; animation: birdfly 30s linear infinite; }
+@keyframes birdfly { from { transform: translateX(-50px) translateY(0); } 50% { transform: translateX(55vw) translateY(-16px); } to { transform: translateX(112vw) translateY(0); } }
+.grass-strip { position: fixed; bottom: -4px; left: 0; right: 0; text-align: center; font-size: 26px; letter-spacing: 16px; opacity: .45; pointer-events: none; z-index: 0; }
+
+/* 減少動態偏好:所有裝飾動畫關掉 */
+@media (prefers-reduced-motion: reduce) {
+  .home-title span, .qm-mound, .qm-walker, .qm-path path,
+  .sky-decor .cloud, .sky-decor .bird { animation: none !important; }
+}

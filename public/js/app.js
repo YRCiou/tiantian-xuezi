@@ -249,6 +249,37 @@ function taskCard(task) {
   if (task.type === "qexam") return { nav: `/qexam/${task.stage.id}`, label: `🎯 第${task.stage.id}季 季檢定・${task.stage.title}`, hint: "這一季的總驗收" };
   return { nav: `/exam/${task.exam.id}`, label: `🎓 檢定挑戰・${task.exam.title}`, hint: "仿正式檢定的模擬考" };
 }
+// 首頁的識字之路:四季畫成地圖上的四站,走到哪看得見
+const STAGE_MOUNDS = ["⛰️", "🏘️", "🌳", "🏮"];
+function questMap() {
+  const current = STAGES.find(st => !store.stageDone(st.id) && (st.id === 1 || store.stageDone(st.id - 1)));
+  return `<div class="quest-map">
+    <div class="qm-label">🗺️ 我的識字之路</div>
+    <svg class="qm-path" viewBox="0 0 680 170" preserveAspectRatio="none" aria-hidden="true"><path d="M 85 118 Q 200 52 340 108 T 595 100"/></svg>
+    <div class="qm-row">
+      ${STAGES.map((st, i) => {
+        const done = store.stageDone(st.id);
+        const isCur = current && current.id === st.id;
+        const locked = !done && !isCur;
+        const ids = []; for (let k = st.units[0]; k <= st.units[1]; k++) ids.push(k);
+        const doneN = ids.filter(k => store.unitDone(k)).length;
+        const sub = done ? `${st.title} ★` : isCur ? `${st.title} ${doneN}/10` : st.title;
+        return `<button class="qm-station ${done ? "done" : ""} ${locked ? "locked" : ""}" onclick="A.goStage(${st.id},${locked})">
+          ${done ? `<span class="qm-sash">已完成</span>` : ""}
+          ${isCur ? `<span class="qm-walker">🚶</span>` : ""}
+          <span class="qm-mound">${STAGE_MOUNDS[i]}</span>
+          <span class="qm-plaque">${locked ? "🔒 " : ""}第${st.id}季<small>${sub}</small></span>
+        </button>`;
+      }).join("")}
+    </div>
+  </div>`;
+}
+A.goStage = (id, locked) => {
+  if (locked) return speak(`第${id}季還沒打開喔!先通過第${id - 1}季的季檢定,就可以走到這裡了。`);
+  nav("/units");
+  const el = document.getElementById("stage-" + id);
+  if (el) el.scrollIntoView({ block: "start" });
+};
 function viewHome() {
   const task = nextTask();
   const card = taskCard(task);
@@ -256,15 +287,22 @@ function viewHome() {
   const stamped = store.data.days[todayStr()];
   const box = store.boxCount();
   const open = store.practiceOpen();
-  app.innerHTML = `<div class="screen">
+  app.innerHTML = `<div class="sky-decor" aria-hidden="true">
+    <span class="cloud" style="top:5%;animation-duration:70s">☁️</span>
+    <span class="cloud" style="top:11%;animation-duration:95s;animation-delay:-40s">☁️</span>
+    <span class="bird" style="top:8%">🕊️</span>
+  </div>
+  <div class="grass-strip" aria-hidden="true">🌾🌼🌾🌿🌾🌼🌾</div>
+  <div class="screen" style="position:relative">
     ${topbar(null, "歡迎來到天天學字!點中間橘色的大卡片,就會帶你去今天要學的東西。下面的識字單元是主課程,旁邊還有每日挑戰、闖關塔可以一直玩。")}
-    <div class="home-title">天天學字</div>
+    <div class="home-title">${"天天學字".split("").map((c, i) => `<span style="animation-delay:${i * 130}ms">${c}</span>`).join("")}</div>
     <div class="home-sub">每天學一點,越學越棒!</div>
     <div class="hero-card" onclick="A.nav('${card.nav}')">
       <div class="hero-line1">${stamped ? "✅ 今天已經學過了,再玩一次也可以!" : "☀️ 今天的任務"}</div>
       <div class="hero-line2">${card.label}</div>
       <div style="font-size:22px;color:#7a6a58;margin-top:6px">${card.hint}</div>
     </div>
+    ${questMap()}
     <div class="stat-row">
       <div class="stat-box"><div class="num">🔥${streak}</div><div class="lbl">連續天數</div></div>
       <div class="stat-box"><div class="num">${store.knownChars()}</div><div class="lbl">認識的字</div></div>
@@ -301,7 +339,7 @@ function viewUnits() {
       const ids = []; for (let i = st.units[0]; i <= st.units[1]; i++) ids.push(i);
       const doneN = ids.filter(i => store.unitDone(i)).length;
       const stOpen = st.id === 1 || store.stageDone(st.id - 1);
-      return `<div class="stage-head">
+      return `<div class="stage-head" id="stage-${st.id}">
           <div class="st-title">${st.emoji} 第${st.id}季 ${st.title}</div>
           <div class="st-sub">${stOpen ? `${st.desc}・完成 ${doneN}/10 單元` : `🔒 先通過第 ${st.id - 1} 季的季檢定`}</div>
         </div>
@@ -312,7 +350,7 @@ function viewUnits() {
           const unlocked = store.unitUnlocked(id);
           const done = store.unitDone(id);
           const n = store.unitProgress(id);
-          return `<div class="unit-card ${unlocked ? "" : "locked"}" onclick="${unlocked ? `A.nav('/unit/${id}')` : `A.lockedMsg(${id})`}">
+          return `<div class="unit-card ${unlocked ? "" : "locked"} ${done ? "finished" : ""}" onclick="${unlocked ? `A.nav('/unit/${id}')` : `A.lockedMsg(${id})`}">
             <span class="u-emoji">${unlocked ? u.emoji : "🔒"}</span>
             <span class="u-mid">
               <div class="u-title">第${id}單元 ${esc(u.title)}</div>
@@ -324,7 +362,7 @@ function viewUnits() {
         ${REVIEW_POINTS.filter(n => n >= st.units[0] && n <= st.units[1]).map(n => {
           const open = store.reviewUnlocked(n);
           const sc = store.reviewScore(n);
-          return `<div class="unit-card review-card ${open ? "" : "locked"}" onclick="${open ? `A.nav('/review/${n}')` : "A.reviewLocked()"}">
+          return `<div class="unit-card review-card ${open ? "" : "locked"} ${sc >= PASS ? "finished" : ""}" onclick="${open ? `A.nav('/review/${n}')` : "A.reviewLocked()"}">
             <span class="u-emoji">${open ? "🔁" : "🔒"}</span>
             <span class="u-mid">
               <div class="u-title">總複習(第 ${n - 4} 到 ${n} 單元)</div>
@@ -333,7 +371,7 @@ function viewUnits() {
             <span class="unit-done-mark">${sc >= PASS ? "🏆" : ""}</span>
           </div>`;
         }).join("")}
-        <div class="unit-card qexam-card ${store.qexamUnlocked(st.id) ? "" : "locked"}" onclick="${store.qexamUnlocked(st.id) ? `A.nav('/qexam/${st.id}')` : "A.qexamLocked()"}">
+        <div class="unit-card qexam-card ${store.qexamUnlocked(st.id) ? "" : "locked"} ${store.qexamScore(st.id) >= PASS ? "finished" : ""}" onclick="${store.qexamUnlocked(st.id) ? `A.nav('/qexam/${st.id}')` : "A.qexamLocked()"}">
           <span class="u-emoji">${store.qexamUnlocked(st.id) ? "🎯" : "🔒"}</span>
           <span class="u-mid">
             <div class="u-title">第${st.id}季 季檢定</div>
