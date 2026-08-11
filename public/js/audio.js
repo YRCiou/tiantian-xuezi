@@ -22,7 +22,7 @@ function speak(text, rate) {
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "zh-TW";
   if (twVoice) u.voice = twVoice;
-  u.rate = rate || 0.85;
+  u.rate = Math.min(0.9, Math.max(0.8, rate || 0.85));
   u.pitch = 1.05;
   speechSynthesis.speak(u);
 }
@@ -88,8 +88,8 @@ function boop() {
 
 const PRAISES = ["答對了,太棒了!", "好厲害!", "答對了,真聰明!", "哇,你好棒!", "沒錯,答對囉!", "太厲害了,繼續加油!"];
 const ENCOURAGE = ["沒關係,再聽一次,再試試看!", "差一點點,再試一次!", "加油,慢慢來!"];
-function praise() { ding(); speak(PRAISES[Math.floor(Math.random() * PRAISES.length)], 1); }
-function encourage() { boop(); speak(ENCOURAGE[Math.floor(Math.random() * ENCOURAGE.length)], 0.9); }
+function praise() { ding(); speak(PRAISES[Math.floor(Math.random() * PRAISES.length)], 0.85); }
+function encourage() { boop(); speak(ENCOURAGE[Math.floor(Math.random() * ENCOURAGE.length)], 0.85); }
 
 // 彩帶 + 大表情
 function confetti(n) {

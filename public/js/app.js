@@ -9,6 +9,11 @@ const A = {}; // 全域事件處理器,給 inline onclick 用
 
 function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
 const BLANK = /（\s*）|（　+）|\(　*\)|（　*\)/g;
+// action-btn 文案分級縮小:中文字數(不含 emoji)超過 4 字時,套用 len-m 縮小字級,避免手機上文字擠成一團
+function actionBtnCls(label, extra) {
+  const cjk = (String(label).match(/[一-鿿]/g) || []).length;
+  return `action-btn${cjk > 4 ? " len-m" : ""}${extra ? " " + extra : ""}`;
+}
 
 function nav(path) {
   stopSpeak();
@@ -98,7 +103,7 @@ function makeQuestion(item, kind, pool, optCount) {
     const word = pick(item.words && item.words.length ? item.words : [item.word]);
     return Object.assign(base, {
       say: word,
-      rate: 0.75,
+      rate: 0.8,
       promptHtml: `<div class="quiz-prompt" onclick="A.sayQ()"><div class="qp-emoji">${item.e}</div>
         <div class="qp-text">${blankOut(word, item.w)}</div>
         <div class="qp-hint">🔊 點一下,再聽一次這個詞</div></div>`,
@@ -154,7 +159,7 @@ function nextQ() {
   </div>`;
   if (q.autoPlay) setTimeout(() => A.sayQ(), 350);
 }
-A.sayQ = () => { const q = Q.questions[Q.idx]; if (q.say) speak(q.say, q.rate || 1); };
+A.sayQ = () => { const q = Q.questions[Q.idx]; if (q.say) speak(q.say, q.rate || 0.85); };
 A.answer = i => {
   if (!Q.awaiting) return;
   const q = Q.questions[Q.idx];
@@ -186,14 +191,14 @@ function finishScreen(opt) {
       <div class="result-text">${esc(opt.title)}</div>
       <div class="result-sub">${esc(opt.sub || "")}</div>
       <div class="action-row" style="max-width:480px;margin:0 auto;">
-        <button class="action-btn bg-blue" onclick="A.nav('${opt.retry}')">${opt.retryLabel || "🔁 再玩一次"}</button>
-        <button class="action-btn bg-green" onclick="A.nav('${opt.next}')">${opt.nextLabel}</button>
+        <button class="${actionBtnCls(opt.retryLabel || "🔁 再玩一次", "bg-blue")}" onclick="A.nav('${opt.retry}')">${opt.retryLabel || "🔁 再玩一次"}</button>
+        <button class="${actionBtnCls(opt.nextLabel, "bg-green")}" onclick="A.nav('${opt.next}')">${opt.nextLabel}</button>
       </div>
       ${opt.note ? `<div class="sub-note" style="margin-top:16px">${esc(opt.note)}</div>` : ""}
     </div>
   </div>`;
   if (opt.stars > 0) celebrate();
-  speak(opt.say || (opt.title + (opt.stars > 0 ? `你得到${opt.stars}顆星星!` : "")), 0.95);
+  speak(opt.say || (opt.title + (opt.stars > 0 ? `你得到${opt.stars}顆星星!` : "")), 0.85);
   const newly = store.checkBadges(); store.save();
   if (opt.extraCelebrate) setTimeout(() => { confetti(24); speak(opt.extraCelebrate); }, 2600);
   if (newly.length) setTimeout(() => { bigPop("🏅"); speak(`恭喜你得到新徽章:${newly.map(b => b.name).join("、")}!`); }, 4200);
@@ -244,7 +249,7 @@ function taskCard(task) {
     tower:  { nav: "/tower",  label: `🗼 闖關塔・第 ${store.towerBest() + 1} 層`, hint: "一層一層往上爬,沒有盡頭" },
   };
   if (m[task.type]) return m[task.type];
-  if (task.type === "unit") return { nav: `/unit/${task.unit.id}/${task.lesson.key}`, label: `${task.unit.emoji} 第${task.unit.id}單元 ${task.unit.title}・${task.lesson.emoji} ${task.lesson.title}`, hint: task.lesson.desc };
+  if (task.type === "unit") return { nav: `/unit/${task.unit.id}/${task.lesson.key}`, label: `${task.unit.emoji} 第${task.unit.id}單元 ${task.unit.title}`, hint: `${task.lesson.emoji} ${task.lesson.title}・${task.lesson.desc}` };
   if (task.type === "review") return { nav: `/review/${task.n}`, label: `🔁 第 ${task.n - 4} 到 ${task.n} 單元・總複習`, hint: "考過六十分,才能繼續往下學" };
   if (task.type === "qexam") return { nav: `/qexam/${task.stage.id}`, label: `🎯 第${task.stage.id}季 季檢定・${task.stage.title}`, hint: "這一季的總驗收" };
   return { nav: `/exam/${task.exam.id}`, label: `🎓 檢定挑戰・${task.exam.title}`, hint: "仿正式檢定的模擬考" };
@@ -263,7 +268,9 @@ function questMap() {
         const locked = !done && !isCur;
         const ids = []; for (let k = st.units[0]; k <= st.units[1]; k++) ids.push(k);
         const doneN = ids.filter(k => store.unitDone(k)).length;
-        const sub = done ? `${st.title} ★` : isCur ? `${st.title} ${doneN}/10` : st.title;
+        const subFull = done ? `${st.title} ★` : isCur ? `${st.title} ${doneN}/10` : st.title;
+        // 站牌空間有限,標題+進度字串太長時,寧可只顯示進度也不要擠爆換行
+        const sub = subFull.length > 9 ? (isCur ? `${doneN}/10` : st.title) : subFull;
         return `<button class="qm-station ${done ? "done" : ""} ${locked ? "locked" : ""}" onclick="A.goStage(${st.id},${locked})">
           ${done ? `<span class="qm-sash">已完成</span>` : ""}
           ${isCur ? `<span class="qm-walker">🚶</span>` : ""}
@@ -291,8 +298,9 @@ function viewHome() {
     <span class="cloud" style="top:5%;animation-duration:70s">☁️</span>
     <span class="cloud" style="top:11%;animation-duration:95s;animation-delay:-40s">☁️</span>
     <span class="bird" style="top:8%">🕊️</span>
+    <span class="boat" style="top:78vh; animation-duration: 42s; animation-delay: -6s;">⛵</span>
   </div>
-  <div class="grass-strip" aria-hidden="true">🌾🌼🌾🌿🌾🌼🌾</div>
+  <div class="sea-strip" aria-hidden="true">🌊 🐚 🌊 🦀 🌊 🐚 🌊</div>
   <div class="screen" style="position:relative">
     ${topbar(null, "歡迎來到天天學字!點中間橘色的大卡片,就會帶你去今天要學的東西。下面的識字單元是主課程,旁邊還有每日挑戰、闖關塔可以一直玩。")}
     <div class="home-title">${"天天學字".split("").map((c, i) => `<span style="animation-delay:${i * 130}ms">${c}</span>`).join("")}</div>
@@ -300,7 +308,7 @@ function viewHome() {
     <div class="hero-card" onclick="A.nav('${card.nav}')">
       <div class="hero-line1">${stamped ? "✅ 今天已經學過了,再玩一次也可以!" : "☀️ 今天的任務"}</div>
       <div class="hero-line2">${card.label}</div>
-      <div style="font-size:22px;color:#7a6a58;margin-top:6px">${card.hint}</div>
+      <div style="font-size:22px;color:var(--text-muted);margin-top:6px">${card.hint}</div>
     </div>
     ${questMap()}
     <div class="stat-row">
@@ -353,7 +361,7 @@ function viewUnits() {
           return `<div class="unit-card ${unlocked ? "" : "locked"} ${done ? "finished" : ""}" onclick="${unlocked ? `A.nav('/unit/${id}')` : `A.lockedMsg(${id})`}">
             <span class="u-emoji">${unlocked ? u.emoji : "🔒"}</span>
             <span class="u-mid">
-              <div class="u-title">第${id}單元 ${esc(u.title)}</div>
+              <div class="u-title"><span class="u-no">第${id}單元</span> ${esc(u.title)}</div>
               <div class="u-progress">${unlocked ? `完成 ${n}/${LESSONS.length} 關` : store.unitLockReason(id)}</div>
             </span>
             <span class="unit-done-mark">${done ? "🏆" : ""}</span>
@@ -400,7 +408,7 @@ function viewUnit(id) {
         const open = store.lessonUnlocked(id, l.key);
         return `<div class="lesson-card ${sc >= PASS ? "done" : ""} ${open ? "" : "locked"}" onclick="${open ? `A.nav('/unit/${id}/${l.key}')` : "A.lessonLocked()"}">
           <span class="l-emoji">${open ? l.emoji : "🔒"}</span>
-          <span class="l-title">${l.title}<div style="font-size:20px;color:#7a6a58;font-weight:normal">${sc > 0 ? `${sc} 分` : l.desc}</div></span>
+          <span class="l-title">${l.title}<div style="font-size:20px;color:var(--text-muted);font-weight:normal">${sc > 0 ? `${sc} 分` : l.desc}</div></span>
           <span class="l-stars">${"⭐".repeat(starsOf(sc))}${"☆".repeat(3 - starsOf(sc))}</span>
         </div>`;
       }).join("")}
@@ -495,7 +503,7 @@ function renderReadStory(u) {
     </div>
     <div class="say-along">🗣️ 點每一句都可以單獨聽,聽完請跟著唸出聲音</div>
     <div class="action-row">
-      <button class="action-btn bg-blue" onclick="A.readAll()">🔊 唸給我聽</button>
+      <button class="action-btn bg-blue" onclick="A.readAll()">🔊 唸給我聽</button>
       <button class="action-btn bg-green" onclick="A.readDone()">✅ 我唸完了</button>
     </div>
   </div>`;
@@ -506,12 +514,12 @@ A.saySentence = i => {
   const sentences = splitSentences(u.story.text);
   document.querySelectorAll(".story-line").forEach(el => el.classList.remove("hl"));
   const el = document.getElementById("sl" + i); if (el) el.classList.add("hl");
-  speak(sentences[i], 0.75);
+  speak(sentences[i], 0.8);
 };
 A.readAll = () => {
   const u = UNIT_BY_ID[readState.uid];
   readState.played = true;
-  speak(u.story.text, 0.72);
+  speak(u.story.text, 0.8);
 };
 A.readDone = () => {
   const u = UNIT_BY_ID[readState.uid];
@@ -653,7 +661,7 @@ function startQexam(i) {
         sub: pass ? `第${i}季完成了,你真的很棒!` : `答對 ${c} 題(共 ${n} 題)`,
         retry: `/qexam/${i}`,
         next: pass ? (STAGE_BY_ID[i + 1] ? `/unit/${st.units[1] + 1}` : "/exam") : "/units",
-        nextLabel: pass ? (STAGE_BY_ID[i + 1] ? "➡️ 進入下一季" : "🎓 去挑戰模擬考") : "📚 回去複習",
+        nextLabel: pass ? (STAGE_BY_ID[i + 1] ? "➡️ 下一季" : "🎓 模擬考") : "📚 回去複習",
         extraCelebrate: pass ? `恭喜你完成第${i}季!${STAGE_BY_ID[i + 1] ? "下一季打開了!" : ""}` : null,
       });
     },
@@ -673,7 +681,7 @@ function viewExams() {
         return `<div class="lesson-card ${sc >= 80 ? "done" : ""} ${unlocked ? "" : "locked"}"
           onclick="${unlocked ? `A.nav('/exam/${e.id}')` : "A.examLocked()"}">
           <span class="l-emoji">${unlocked ? e.emoji : "🔒"}</span>
-          <span class="l-title">${e.title}<div style="font-size:20px;color:#7a6a58;font-weight:normal">${sc ? `${sc} 分` : "選字・聽寫・讀句子"}</div></span>
+          <span class="l-title">${e.title}<div style="font-size:20px;color:var(--text-muted);font-weight:normal">${sc ? `${sc} 分` : "選字・聽寫・讀句子"}</div></span>
           <span class="l-stars">${"⭐".repeat(starsOf(sc))}${"☆".repeat(3 - starsOf(sc))}</span>
         </div>`;
       }).join("")}
@@ -689,7 +697,7 @@ function runExamLike(e, cfg) {
     const m = shuffleOpts(q.opts, q.a);
     return {
       type: "exam", item: null,
-      say: isListen ? q.say : q.q.replace(BLANK, "空格"), rate: isListen ? 1 : 0.8,
+      say: isListen ? q.say : q.q.replace(BLANK, "空格"), rate: isListen ? 0.85 : 0.8,
       autoPlay: isListen,
       promptHtml: isListen
         ? `<button class="big-sound-btn" onclick="A.sayQ()">🔊</button><div class="sub-note">${esc(q.q)}</div>`
@@ -794,12 +802,12 @@ function viewTower() {
     <div class="streak-banner">
       <div class="fire">🗼</div>
       <div class="s-text">最高爬到 ${best} 層</div>
-      <div style="font-size:22px;color:#7a6a58">${open ? "題目從你學過的字裡面出,越爬越難" : "先去識字單元學第一課就會打開"}</div>
+      <div style="font-size:22px;color:var(--text-muted)">${open ? "題目從你學過的字裡面出,越爬越難" : "先去識字單元學第一課就會打開"}</div>
     </div>
     <div class="action-row">
-      <button class="action-btn bg-green" onclick="${open ? `A.nav('/tower/${best + 1}')` : "A.practiceLocked()"}">⬆️ 挑戰第 ${best + 1} 層</button>
+      <button class="action-btn bg-green" onclick="${open ? `A.nav('/tower/${best + 1}')` : "A.practiceLocked()"}">⬆️ 第 ${best + 1} 層</button>
     </div>
-    ${best > 0 ? `<div class="action-row"><button class="action-btn bg-blue" onclick="A.nav('/tower/1')">🔁 從第 1 層重新爬</button></div>` : ""}
+    ${best > 0 ? `<div class="action-row"><button class="action-btn bg-blue" onclick="A.nav('/tower/1')">🔁 重新挑戰</button></div>` : ""}
   </div>`;
 }
 A.practiceLocked = () => speak("先去識字單元學第一課,這裡就會打開囉!");
@@ -813,10 +821,10 @@ function viewReading() {
     ${units.length === 0 ? `<div class="sub-note">先去識字單元學第一課,這裡就會有文章囉!</div>` : ""}
     ${units.map(u => `<div class="phrase-card" onclick="A.nav('/reading/${u.id}')">
       <div class="p-emoji">${u.emoji}</div>
-      <div class="p-text">${esc(u.story.title)}<div style="font-size:20px;color:#7a6a58">第${u.id}單元 ${esc(u.title)}</div></div>
+      <div class="p-text">${esc(u.story.title)}<div style="font-size:20px;color:var(--text-muted)">第${u.id}單元 ${esc(u.title)}</div></div>
     </div>`).join("")}
     ${units.length ? `<div class="section-title" style="margin-top:24px">💬 生活常用句</div>` : ""}
-    ${units.flatMap(u => u.phrases).map(ph => `<div class="phrase-card" onclick="speak('${esc(ph.t)}', 0.75)">
+    ${units.flatMap(u => u.phrases).map(ph => `<div class="phrase-card" onclick="speak('${esc(ph.t)}', 0.8)">
       <div class="p-emoji">${ph.e}</div><div class="p-text">${esc(ph.t)}</div>
     </div>`).join("")}
   </div>`;
@@ -833,8 +841,8 @@ function viewReadingOne(id) {
     </div>
     <div class="say-along">🗣️ 唸出聲音,對記憶最有幫助!</div>
     <div class="action-row">
-      <button class="action-btn bg-blue" onclick="speak(READ_TEXT, 0.72)">🔊 整篇唸給我聽</button>
-      <button class="action-btn bg-green" onclick="A.readPractised(${id})">✅ 我唸完了</button>
+      <button class="action-btn bg-blue" onclick="speak(READ_TEXT, 0.8)">🔊 唸給我聽</button>
+      <button class="action-btn bg-green" onclick="A.readPractised(${id})">✅ 我唸完了</button>
     </div>
   </div>`;
   window.READ_TEXT = u.story.text;
@@ -844,7 +852,7 @@ A.sayOne = (id, i) => {
   const sentences = splitSentences(u.story.text);
   document.querySelectorAll(".story-line").forEach(el => el.classList.remove("hl"));
   const el = document.getElementById("rl" + i); if (el) el.classList.add("hl");
-  speak(sentences[i], 0.75);
+  speak(sentences[i], 0.8);
 };
 A.readPractised = id => {
   store.stampToday(); store.data.stars += 1; store.checkBadges(); store.save();
@@ -862,7 +870,7 @@ function viewBox() {
     <div class="section-title">🔁 錯字複習</div>
     ${list.length === 0
       ? `<div class="streak-banner"><div class="fire">🎉</div><div class="s-text">沒有要複習的字!</div>
-         <div style="font-size:22px;color:#7a6a58">你都答對了,真棒!</div></div>`
+         <div style="font-size:22px;color:var(--text-muted)">你都答對了,真棒!</div></div>`
       : `<div class="sub-note">有 ${list.length} 個字要多練習</div>
          <div class="symbol-grid">${list.map(ch => `<button class="symbol-btn" onclick="A.nav('/write/${ch}')">${ch}</button>`).join("")}</div>
          <div class="action-row"><button class="action-btn bg-green" onclick="A.nav('/box/go')">▶️ 開始複習</button></div>`}
@@ -910,7 +918,7 @@ function nextTraceTarget(ch) {
     const u = UNIT_BY_ID[uid];
     const i = u.items.findIndex(it => it.w === ch);
     if (i >= 0 && i < u.items.length - 1) {
-      return { path: `/unit/${uid}/learn`, idx: i + 1, label: `➡️ 下一個字:${u.items[i + 1].w}` };
+      return { path: `/unit/${uid}/learn`, idx: i + 1, label: `➡️ 下一字:${u.items[i + 1].w}` };
     }
     return { path: `/unit/${uid}`, idx: -1, label: "📋 回單元" };
   }
@@ -972,7 +980,7 @@ function setupCanvas() {
   canvas.onpointermove = e => {
     if (!drawing) return;
     const r = canvas.getBoundingClientRect(); const x = e.clientX - r.left, y = e.clientY - r.top;
-    ctx.strokeStyle = "#E86A33"; ctx.lineWidth = 13; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.strokeStyle = "#C97A3A"; ctx.lineWidth = 13; ctx.lineCap = "round"; ctx.lineJoin = "round";
     ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(x, y); ctx.stroke();
     lastX = x; lastY = y; hasInk = true;
   };
@@ -985,10 +993,10 @@ function drawTemplate() {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.width / dpr, h = canvas.height / dpr;
   ctx.clearRect(0, 0, w, h);
-  ctx.strokeStyle = "#E8DFD3"; ctx.lineWidth = 2; ctx.setLineDash([10, 10]);
+  ctx.strokeStyle = "#CDBFA8"; ctx.lineWidth = 2; ctx.setLineDash([10, 10]);
   ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle = "#D8CFC4";
+  ctx.fillStyle = "#D6CBBB";
   ctx.font = `900 ${Math.min(w, h) * 0.72}px "Microsoft JhengHei", sans-serif`;
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText(traceChar, w / 2, h / 2 + Math.min(w, h) * 0.03);
@@ -1029,7 +1037,7 @@ function traceCoverage() {
     for (let y = 0; y < canvas.height; y += 2) {
       for (let x = 0; x < canvas.width; x += 2) {
         const i = (y * canvas.width + x) * 4;
-        // 筆跡是橘色 #E86A33,範本與格線是灰色,用紅藍差距分辨
+        // 筆跡是焦糖色 #C97A3A,範本與格線是灰色,用紅藍差距分辨(門檻不變,新色 R-B 差 143,遠高於 50)
         if (d[i] - d[i + 2] > 50 && d[i + 3] > 60) ink[Math.floor(y / chh) * TRACE_GRID + Math.floor(x / cw)] = 1;
       }
     }
@@ -1084,14 +1092,14 @@ function traceResult(cover, ok, first) {
       <div class="result-sub">描到了 ${pct} 分的字${ok ? "" : ",再描一次會更好"}</div>
       <div class="action-row" style="max-width:480px;margin:0 auto;">
         <button class="action-btn ${ok ? "bg-blue" : "bg-orange"}" onclick="A.nav('/write/${ch}')">🔁 再寫一次</button>
-        <button class="action-btn ${ok ? "bg-green" : "bg-blue"}" onclick="A.traceNext('${t.path}',${t.idx})">${t.label}</button>
+        <button class="${actionBtnCls(t.label, ok ? "bg-green" : "bg-blue")}" onclick="A.traceNext('${t.path}',${t.idx})">${t.label}</button>
       </div>
       ${ok ? "" : `<div class="sub-note" style="margin-top:14px">沒關係,想繼續也可以按右邊的按鈕。</div>`}
     </div>
   </div>`;
   speak(ok
     ? (first ? `寫得真好!你得到一顆星星!` : `${ch}寫得越來越漂亮了!`)
-    : `不錯喔!有些地方還沒描到,想再寫一次就按左邊,想學下一個就按右邊。`, 0.95);
+    : `不錯喔!有些地方還沒描到,想再寫一次就按左邊,想學下一個就按右邊。`, 0.85);
   const newly = store.checkBadges(); store.save();
   if (newly.length) setTimeout(() => { bigPop("🏅"); speak(`恭喜你得到新徽章:${newly.map(b => b.name).join("、")}!`); }, 3200);
 }
@@ -1168,7 +1176,7 @@ function viewGames() {
         const open = i === 0 || (store.data.bpmf.levels[i - 1] || 0) >= 1;
         return `<button class="level-btn ${open ? "" : "locked"}" onclick="${open ? `A.nav('/games/${i + 1}')` : "A.lockedLevel()"}">
           <div class="lv-num">${open ? "" : "🔒 "}第 ${i + 1} 關</div>
-          <div class="lv-syms">${syms.join(" ")}</div>
+          <div class="lv-syms ${syms.length >= 4 ? "many" : ""}">${syms.join(" ")}</div>
           <div class="lv-stars">${"⭐".repeat(stars)}${"☆".repeat(3 - stars)}</div>
         </button>`;
       }).join("")}
@@ -1262,7 +1270,7 @@ function viewRewards() {
     <div class="streak-banner">
       <div class="fire">🔥</div>
       <div class="s-text">連續學習 ${store.streakNow()} 天</div>
-      <div style="font-size:22px;color:#7a6a58">認識 ${store.knownChars()} 個字・⭐ ${store.data.stars} 顆星星</div>
+      <div style="font-size:22px;color:var(--text-muted)">認識 ${store.knownChars()} 個字・⭐ ${store.data.stars} 顆星星</div>
     </div>
     <div class="section-title">📅 ${m + 1} 月學習月曆</div>
     <div class="cal-grid">

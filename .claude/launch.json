@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "ttxz",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["wrangler", "pages", "dev", "public", "--port", "8788"],
-      "port": 8788
+      "name": "static",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Users/yuren/AppData/Local/Temp/claude/D--OneDrive-claude-94-LearningChinese/2a77289f-c232-4ce4-8dda-28c180c80995/scratchpad/static-server.js"],
+      "port": 8791
     }
   ]
 }
