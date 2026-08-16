@@ -484,9 +484,31 @@ function digitsToZh(s) {
 }
 // 比對用的正規化:數字轉國字,再把常見同義說法拉平(塊錢=元、兩=二)
 function normSpeech(s) { return digitsToZh(s).replace(/塊錢|塊/g, "元").replace(/兩/g, "二"); }
+// 同音/易混字:辨識常把單一個字聽成同音字,對長輩放寬認定
+const SOUND_ALIKE = {
+  "一": "醫衣依伊壹", "二": "貳餓", "三": "參叁傘散山", "四": "肆是似寺",
+  "五": "伍舞武屋午", "六": "陸綠", "七": "柒妻期漆", "八": "捌爸巴吧",
+  "九": "玖酒久韭", "十": "拾是時石食實", "百": "佰白擺", "千": "仟遷簽",
+  "元": "圓園原員", "零": "林靈",
+};
+function charOk(ch, h) {
+  if (h.includes(ch)) return true;
+  const alike = SOUND_ALIKE[ch] || "";
+  for (const a of alike) if (h.includes(a)) return true;
+  return false;
+}
 function heardMatches(heard, targets) {
   const h = normSpeech(heard);
-  return targets.some(t => h.includes(normSpeech(t)));
+  if (!h) return false;
+  return targets.some(t => {
+    const tt = normSpeech(t);
+    if (!tt) return false;
+    if (h.includes(tt)) return true;
+    // 唸對目標裡一半以上的字(含同音字)就算過,不要對老人家太嚴格
+    const chars = Array.from(tt);
+    const hit = chars.filter(c => charOk(c, h)).length;
+    return hit >= Math.max(1, Math.ceil(chars.length / 2));
+  });
 }
 A.sayAlong = (uid, i) => {
   const it = UNIT_BY_ID[uid].items[i];
