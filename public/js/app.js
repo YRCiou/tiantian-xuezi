@@ -483,7 +483,7 @@ A.sayAlong = (uid, i) => {
     } else return; // 已經離開這一頁,安靜收工
     if (denied) return speak("要先允許使用麥克風,我才聽得到你唸喔!");
     if (heard && targets.some(t => heard.includes(t))) {
-      bigPop("⭕"); confetti(10); applause(1);
+      bigPop("⭕"); confetti(10); ding(0.18); // 輕一點的叮咚,不用拍手
       speak(`唸得真好!就是「${it.w}」!`);
     } else if (heard) {
       speak(`我聽到你唸「${heard}」。再聽一次:${it.w}。${it.word}。然後再點一次唸唸看!`, 0.8);

@@ -72,15 +72,15 @@ function applause(duration) {
   } catch (e) { /* 音效失敗不影響流程 */ }
 }
 
-// 答對的叮咚聲
-function ding() {
+// 答對的叮咚聲(vol 可調音量,不傳就是原本的大小)
+function ding(vol) {
   try {
     const ctx = ac();
     [523.25, 659.25, 783.99].forEach((freq, i) => {
       const o = ctx.createOscillator(); const g = ctx.createGain();
       o.type = "sine"; o.frequency.value = freq;
       g.gain.setValueAtTime(0.001, ctx.currentTime + i * 0.09);
-      g.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime + i * 0.09 + 0.02);
+      g.gain.exponentialRampToValueAtTime(vol || 0.35, ctx.currentTime + i * 0.09 + 0.02);
       g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.09 + 0.5);
       o.connect(g); g.connect(ctx.destination);
       o.start(ctx.currentTime + i * 0.09); o.stop(ctx.currentTime + i * 0.09 + 0.55);
