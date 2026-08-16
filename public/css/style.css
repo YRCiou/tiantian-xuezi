@@ -495,6 +495,70 @@ body {
   50%      { transform: translateY(-4px); }
 }
 
+/* ===== 4.0 一頁式版面 =====
+   目標:iPhone(13/16/17)直立時,學字卡、測驗、寫字這些操作頁的所有按鈕
+   都在一個畫面裡,不必捲動。做法:尺寸改用 svh(最小可視高度)的 clamp(),
+   螢幕越矮字越小;桌機/平板高度夠,clamp 取到最大值,外觀不變。
+   不支援 svh 的舊瀏覽器會忽略這些宣告,自動退回上面的原本尺寸。 */
+.screen {
+  min-height: 100svh;
+  padding: clamp(10px, 1.6svh, 16px) 16px clamp(12px, 2svh, 40px);
+  padding-bottom: calc(clamp(12px, 2svh, 40px) + env(safe-area-inset-bottom, 0px));
+}
+/* 高度充足(桌機/平板)時,內距維持原本的 16/40 */
+@media (min-height: 800px) {
+  .screen { padding: 16px 16px 40px; padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* 頂欄 */
+.topbar { margin-bottom: clamp(8px, 1.4svh, 14px); }
+.btn-back, .btn-help { height: clamp(50px, 7.6svh, 68px); min-width: clamp(64px, 11svh, 80px); font-size: clamp(24px, 4svh, 32px); }
+.star-count { font-size: clamp(22px, 3.4svh, 28px); padding: clamp(6px, 1.2svh, 10px) clamp(12px, 2.2svh, 18px); }
+
+/* 學習卡(認字/注音) */
+.learn-card { padding: clamp(8px, 1.6svh, 18px) 16px clamp(10px, 2svh, 24px); gap: clamp(2px, 0.8svh, 6px); min-height: 0; }
+.learn-symbol { font-size: clamp(64px, 15svh, 150px); }
+.learn-symbol.small { font-size: clamp(52px, 12svh, 110px); }
+.learn-zy { font-size: clamp(22px, 3.8svh, 34px); line-height: 1.2; }
+.learn-emoji { font-size: clamp(40px, 7.5svh, 80px); }
+.learn-word { font-size: clamp(26px, 4.8svh, 44px); line-height: 1.2; }
+.learn-sentence { font-size: clamp(18px, 3.2svh, 30px); margin-top: clamp(2px, 0.6svh, 6px); }
+.say-along { font-size: clamp(17px, 2.7svh, 24px); padding: clamp(8px, 1.5svh, 14px) 12px; margin: clamp(8px, 1.3svh, 14px) 0; }
+
+/* 動作列與翻頁列 */
+.action-row { margin-top: clamp(8px, 1.5svh, 16px); gap: clamp(8px, 1.5svh, 12px); }
+.action-btn { min-height: clamp(56px, 8.6svh, 92px); font-size: clamp(20px, 3.3svh, 26px); padding: clamp(8px, 1.5svh, 18px) 6px; }
+.action-btn.len-m { font-size: clamp(18px, 2.9svh, 22px); }
+.nav-row { margin-top: clamp(8px, 1.3svh, 14px); gap: clamp(8px, 1.5svh, 14px); }
+.nav-btn { font-size: clamp(22px, 3.5svh, 30px); padding: clamp(8px, 1.5svh, 14px) 0; }
+.dots { margin-top: clamp(6px, 1.1svh, 12px); font-size: clamp(15px, 2.3svh, 20px); }
+
+/* 標題與測驗頁 */
+.section-title { font-size: clamp(24px, 3.7svh, 30px); margin: clamp(8px, 1.5svh, 16px) 0 clamp(6px, 1.1svh, 12px); }
+.sub-note { font-size: clamp(18px, 2.9svh, 22px); }
+.quiz-progress { margin: clamp(4px, 0.8svh, 6px) 0 clamp(8px, 1.5svh, 14px); font-size: clamp(20px, 3.3svh, 30px); }
+.big-sound-btn { width: clamp(140px, 24svh, 190px); height: clamp(100px, 18svh, 150px); font-size: clamp(48px, 8.6svh, 70px); margin: clamp(4px, 0.8svh, 6px) auto clamp(12px, 2.2svh, 22px); }
+.quiz-prompt { padding: clamp(10px, 1.8svh, 18px); margin-bottom: clamp(10px, 1.9svh, 22px); }
+.quiz-prompt .qp-emoji { font-size: clamp(58px, 10.5svh, 90px); }
+.quiz-prompt .qp-text { font-size: clamp(26px, 4.3svh, 36px); }
+.choice-row { gap: clamp(10px, 1.9svh, 16px); }
+.choice-btn { font-size: clamp(44px, 7.8svh, 66px); padding: clamp(12px, 2.3svh, 20px) 0; }
+
+/* 手寫頁 */
+.write-head { margin-bottom: clamp(4px, 1svh, 10px); }
+.write-symbol-label { font-size: clamp(38px, 6.4svh, 54px); }
+.write-word-label { font-size: clamp(20px, 3.2svh, 28px); }
+
+/* 結果頁 */
+.result-box { padding: clamp(10px, 2.4svh, 30px) 0; }
+.result-stars { font-size: clamp(56px, 9.8svh, 84px); }
+.result-text { font-size: clamp(30px, 4.9svh, 42px); margin: clamp(8px, 1.8svh, 16px) 0 8px; }
+.result-sub { font-size: clamp(20px, 3.1svh, 26px); margin-bottom: clamp(14px, 2.9svh, 26px); }
+.write-big { font-size: clamp(64px, 11svh, 96px); }
+
+/* 朗讀頁 */
+.story-box { font-size: clamp(24px, 3.9svh, 34px); padding: clamp(12px, 2.1svh, 22px) 16px; line-height: 1.7; }
+
 /* 減少動態偏好:所有裝飾動畫關掉 */
 @media (prefers-reduced-motion: reduce) {
   .home-title span, .qm-mound, .qm-walker, .qm-path path,
