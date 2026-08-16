@@ -462,6 +462,32 @@ A.sayItem = (uid, i) => {
 // 手機不支援語音辨識時,退回「慢速示範唸一次」讓人跟讀
 let recog = null, recogGuard = null;
 function sayAlongHtml(it) { return `🗣️ 換你唸唸看:<b>${it.w}</b>,${esc(it.word)}`; }
+// 語音辨識常把數字寫成阿拉伯數字、加貨幣符號(十元→「10元」「$10」),
+// 直接比對會冤枉唸對的人。先把辨識結果轉回國字唸法再比。
+const NUM_CHAR = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+function digitsToZh(s) {
+  let t = String(s).replace(/[\s,。,、!?.]/g, "");
+  t = t.replace(/(?:NT\$|US\$|[$¥￥])(\d+)/gi, "$1元");   // $10 → 10元
+  t = t.replace(/(\d+)(?:美元|美金)/g, "$1元");            // 10美元 → 10元
+  return t.replace(/\d+/g, m => {
+    const n = parseInt(m, 10);
+    if (isNaN(n) || n > 9999) return m;
+    if (n === 0) return "零";
+    let out = "";
+    const th = Math.floor(n / 1000), h = Math.floor(n % 1000 / 100), te = Math.floor(n % 100 / 10), on = n % 10;
+    if (th) out += NUM_CHAR[th] + "千";
+    if (h) out += NUM_CHAR[h] + "百"; else if (th && (te || on)) out += "零";
+    if (te) out += (te === 1 && !th && !h ? "" : NUM_CHAR[te]) + "十"; else if (h && on) out += "零";
+    if (on) out += NUM_CHAR[on];
+    return out;
+  });
+}
+// 比對用的正規化:數字轉國字,再把常見同義說法拉平(塊錢=元、兩=二)
+function normSpeech(s) { return digitsToZh(s).replace(/塊錢|塊/g, "元").replace(/兩/g, "二"); }
+function heardMatches(heard, targets) {
+  const h = normSpeech(heard);
+  return targets.some(t => h.includes(normSpeech(t)));
+}
 A.sayAlong = (uid, i) => {
   const it = UNIT_BY_ID[uid].items[i];
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -482,11 +508,11 @@ A.sayAlong = (uid, i) => {
       el.innerHTML = sayAlongHtml(it);
     } else return; // 已經離開這一頁,安靜收工
     if (denied) return speak("要先允許使用麥克風,我才聽得到你唸喔!");
-    if (heard && targets.some(t => heard.includes(t))) {
+    if (heard && heardMatches(heard, targets)) {
       bigPop("⭕"); confetti(10); ding(0.18); // 輕一點的叮咚,不用拍手
       speak(`唸得真好!就是「${it.w}」!`);
     } else if (heard) {
-      speak(`我聽到你唸「${heard}」。再聽一次:${it.w}。${it.word}。然後再點一次唸唸看!`, 0.8);
+      speak(`我聽到你唸「${digitsToZh(heard)}」。再聽一次:${it.w}。${it.word}。然後再點一次唸唸看!`, 0.8);
     } else {
       speak("我沒有聽清楚,再點一次,大聲唸出來!");
     }
@@ -499,7 +525,7 @@ A.sayAlong = (uid, i) => {
     recog.onresult = e => {
       const alts = [];
       for (const res of e.results) for (const a of res) alts.push((a.transcript || "").trim());
-      heard = alts.find(t => targets.some(x => t.includes(x))) || alts[0] || "";
+      heard = alts.find(t => heardMatches(t, targets)) || alts[0] || "";
     };
     recog.onerror = ev => { if (ev && ev.error === "not-allowed") denied = true; };
     recog.onend = done;
