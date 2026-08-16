@@ -326,6 +326,13 @@ canvas#traceCanvas {
   cursor: pointer; transition: transform .1s ease;
 }
 .say-along:active { transform: scale(.97); }
+/* 正在用麥克風聽的狀態:紅色實線+輕輕脈動 */
+.say-along.listening {
+  border-style: solid; border-color: var(--red); color: var(--red);
+  background: var(--wrong-bg);
+  animation: listenpulse 1.2s ease-in-out infinite;
+}
+@keyframes listenpulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
 .story-box {
   background: var(--card); border: 5px solid var(--primary); border-radius: 24px;
   padding: 22px 20px; font-size: 34px; line-height: 1.9; box-shadow: var(--shadow);
@@ -565,5 +572,5 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .home-title span, .qm-mound, .qm-walker, .qm-path path,
   .sky-decor .cloud, .sky-decor .bird, .sky-decor .boat,
-  .sea-strip, .qm-station::before { animation: none !important; }
+  .sea-strip, .qm-station::before, .say-along.listening { animation: none !important; }
 }
