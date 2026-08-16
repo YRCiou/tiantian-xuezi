@@ -1,13 +1,18 @@
 // 語音(台灣中文)+ 音效(拍手、叮咚)
 let twVoice = null;
+// iOS 內建的特效/卡通語音(Eddy、Flo、阿公阿嬤聲…)唸中文怪腔怪調甚至不出聲,
+// 而且在語音清單裡排在正常語音前面,一律不選
+const NOVELTY_VOICE = /Eddy|Flo|Grandma|Grandpa|Reed|Rocko|Sandy|Shelley|Albert|Bad News|Good News|Bahh|Bells|Boing|Bubbles|Cellos|Jester|Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Junior|Kathy|Ralph|Fred/i;
 function pickVoice() {
-  // 優先挑品質好的語音:Google 線上語音 > 自然語音(Natural/Online) > 台灣地區 > 其他中文
-  const voices = speechSynthesis.getVoices().filter(v => v.lang && v.lang.replace("_", "-").startsWith("zh"));
+  // 優先挑品質好的語音:Google 線上語音 > 自然語音(Natural/Online) > 蘋果/微軟正常中文聲 > 台灣地區 > 其他中文
+  const voices = speechSynthesis.getVoices().filter(v =>
+    v.lang && v.lang.replace("_", "-").startsWith("zh") && !NOVELTY_VOICE.test(v.name));
   const score = v =>
-    (/Google/i.test(v.name) ? 8 : 0) +
-    (/Natural|Online|Neural/i.test(v.name) ? 4 : 0) +
+    (/Google/i.test(v.name) ? 16 : 0) +
+    (/Natural|Online|Neural/i.test(v.name) ? 8 : 0) +
+    (/Meijia|Mei-?Jia|美嘉|HsiaoChen|HanHan|Yating|Zhiwei/i.test(v.name) ? 4 : 0) +
     (v.lang.replace("_", "-") === "zh-TW" ? 2 : 0) +
-    (/HsiaoChen|HanHan|Yating|Zhiwei/i.test(v.name) ? 1 : 0);
+    (v.default ? 1 : 0);
   voices.sort((a, b) => score(b) - score(a));
   twVoice = voices[0] || null;
 }
@@ -21,10 +26,13 @@ function speak(text, rate) {
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "zh-TW";
-  if (twVoice) u.voice = twVoice;
+  // 語音物件失效時指派會拋錯,不能讓它把整個按鈕的動作中斷——退回系統預設聲音
+  if (twVoice) { try { u.voice = twVoice; } catch (e) { twVoice = null; } }
   u.rate = Math.min(0.9, Math.max(0.8, rate || 0.85));
   u.pitch = 1.05;
   speechSynthesis.speak(u);
+  // iOS 偶爾會卡在暫停狀態,speak 完踢一下讓它繼續唸
+  if (speechSynthesis.paused) speechSynthesis.resume();
 }
 function stopSpeak() { if ("speechSynthesis" in window) speechSynthesis.cancel(); }
 
