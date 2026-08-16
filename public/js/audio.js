@@ -1,40 +1,48 @@
 // 語音(台灣中文)+ 音效(拍手、叮咚)
 let twVoice = null;
-// iOS 內建的特效/卡通語音(Eddy、Flo、阿公阿嬤聲…)唸中文怪腔怪調甚至不出聲,
-// 而且在語音清單裡排在正常語音前面,一律不選
-const NOVELTY_VOICE = /Eddy|Flo|Grandma|Grandpa|Reed|Rocko|Sandy|Shelley|Albert|Bad News|Good News|Bahh|Bells|Boing|Bubbles|Cellos|Jester|Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Junior|Kathy|Ralph|Fred/i;
+// iOS 內建的特效/卡通語音(Eddy、Flo、阿公阿嬤聲…)唸中文怪腔怪調甚至不出聲;
+// 系統語言是中文時,名稱還會變成中文(艾迪、阿嬤…),黑名單擋不完。
+// 所以反過來:只有「確定是好聲音」才手動指定,其他一律不指定,
+// 交給系統依 u.lang="zh-TW" 用預設聲來唸(iOS 會自己選美嘉,最穩)。
+const NOVELTY_VOICE = /Eddy|Flo|Grandma|Grandpa|Reed|Rocko|Sandy|Shelley|Albert|Bad News|Good News|Bahh|Bells|Boing|Bubbles|Cellos|Jester|Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Junior|Kathy|Ralph|Fred|艾迪|阿公|阿嬤/i;
 function pickVoice() {
-  // 優先挑品質好的語音:Google 線上語音 > 自然語音(Natural/Online) > 蘋果/微軟正常中文聲 > 台灣地區 > 其他中文
   const voices = speechSynthesis.getVoices().filter(v =>
     v.lang && v.lang.replace("_", "-").startsWith("zh") && !NOVELTY_VOICE.test(v.name));
+  // 好聲音的排序:Google 線上語音 > 自然語音(Natural/Online) > 蘋果/微軟已知的中文聲
   const score = v =>
     (/Google/i.test(v.name) ? 16 : 0) +
     (/Natural|Online|Neural/i.test(v.name) ? 8 : 0) +
-    (/Meijia|Mei-?Jia|美嘉|HsiaoChen|HanHan|Yating|Zhiwei/i.test(v.name) ? 4 : 0) +
-    (v.lang.replace("_", "-") === "zh-TW" ? 2 : 0) +
-    (v.default ? 1 : 0);
-  voices.sort((a, b) => score(b) - score(a));
-  twVoice = voices[0] || null;
+    (/Meijia|Mei-?Jia|美嘉|HsiaoChen|曉臻|HanHan|Yating|雅婷|Zhiwei/i.test(v.name) ? 4 : 0);
+  const good = voices.filter(v => score(v) > 0).sort((a, b) => score(b) - score(a));
+  twVoice = good[0] || null;
 }
 if ("speechSynthesis" in window) {
   pickVoice();
   speechSynthesis.onvoiceschanged = pickVoice;
 }
 
+let _speakRetry = null;
 function speak(text, rate) {
   if (!("speechSynthesis" in window)) return;
-  speechSynthesis.cancel();
+  const s = speechSynthesis;
+  try { s.cancel(); } catch (e) {}
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "zh-TW";
   // 語音物件失效時指派會拋錯,不能讓它把整個按鈕的動作中斷——退回系統預設聲音
   if (twVoice) { try { u.voice = twVoice; } catch (e) { twVoice = null; } }
   u.rate = Math.min(0.9, Math.max(0.8, rate || 0.85));
   u.pitch = 1.05;
-  speechSynthesis.speak(u);
+  s.speak(u);
   // iOS 偶爾會卡在暫停狀態,speak 完踢一下讓它繼續唸
-  if (speechSynthesis.paused) speechSynthesis.resume();
+  if (s.paused) { try { s.resume(); } catch (e) {} }
+  // iOS 已知臭蟲:cancel 之後馬上 speak,這句偶爾會被吞掉。
+  // 稍後檢查一下,發現根本沒開始唸就再唸一次。
+  clearTimeout(_speakRetry);
+  _speakRetry = setTimeout(() => {
+    if (!s.speaking && !s.pending) { try { s.speak(u); } catch (e) {} }
+  }, 300);
 }
-function stopSpeak() { if ("speechSynthesis" in window) speechSynthesis.cancel(); }
+function stopSpeak() { clearTimeout(_speakRetry); if ("speechSynthesis" in window) speechSynthesis.cancel(); }
 
 let _ac = null;
 function ac() {
