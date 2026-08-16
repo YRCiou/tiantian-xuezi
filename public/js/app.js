@@ -441,7 +441,7 @@ function renderLearnCard(u) {
       <div class="learn-word">${esc(it.words.join("、"))}</div>
       <div class="learn-sentence">${esc(it.s)}</div>
     </div>
-    <div class="say-along">🗣️ 換你唸唸看:<b>${it.w}</b>,${esc(it.word)}</div>
+    <div class="say-along" onclick="A.sayAlong(${u.id},${learnIdx})">🗣️ 換你唸唸看:<b>${it.w}</b>,${esc(it.word)}</div>
     <div class="action-row">
       <button class="action-btn bg-blue" onclick="A.sayItem(${u.id},${learnIdx})">🔊 再聽一次</button>
       <button class="action-btn bg-purple" onclick="A.writeFromLearn(${u.id},${learnIdx})">✍️ 寫寫看</button>
@@ -457,6 +457,11 @@ function renderLearnCard(u) {
 A.sayItem = (uid, i) => {
   const it = UNIT_BY_ID[uid].items[i];
   speak(`${it.w}。${it.word}的${it.w}。${it.s}`);
+};
+// 點「換你唸唸看」:用最慢的速度示範唸一次,方便跟讀
+A.sayAlong = (uid, i) => {
+  const it = UNIT_BY_ID[uid].items[i];
+  speak(`${it.w}。${it.word}`, 0.8);
 };
 A.learnPrev = uid => { const u = UNIT_BY_ID[uid]; learnIdx = (learnIdx - 1 + u.items.length) % u.items.length; renderLearnCard(u); };
 A.learnNext = uid => {
@@ -501,7 +506,7 @@ function renderReadStory(u) {
     <div class="story-box">
       ${sentences.map((s, i) => `<span class="story-line" id="sl${i}" onclick="A.saySentence(${i})">${esc(s)}</span>`).join("")}
     </div>
-    <div class="say-along">🗣️ 點每一句都可以單獨聽,聽完請跟著唸出聲音</div>
+    <div class="say-along" onclick="A.readAll()">🗣️ 點每一句都可以單獨聽,聽完請跟著唸出聲音</div>
     <div class="action-row">
       <button class="action-btn bg-blue" onclick="A.readAll()">🔊 唸給我聽</button>
       <button class="action-btn bg-green" onclick="A.readDone()">✅ 我唸完了</button>
@@ -839,7 +844,7 @@ function viewReadingOne(id) {
     <div class="story-box">
       ${sentences.map((s, i) => `<span class="story-line" onclick="A.sayOne(${id},${i})" id="rl${i}">${esc(s)}</span>`).join("")}
     </div>
-    <div class="say-along">🗣️ 唸出聲音,對記憶最有幫助!</div>
+    <div class="say-along" onclick="speak(READ_TEXT, 0.8)">🗣️ 唸出聲音,對記憶最有幫助!</div>
     <div class="action-row">
       <button class="action-btn bg-blue" onclick="speak(READ_TEXT, 0.8)">🔊 唸給我聽</button>
       <button class="action-btn bg-green" onclick="A.readPractised(${id})">✅ 我唸完了</button>

@@ -323,7 +323,9 @@ canvas#traceCanvas {
   font-size: 24px; text-align: center; color: var(--purple); font-weight: bold;
   background: var(--purple-pale); border: 4px dashed var(--purple); border-radius: 20px;
   padding: 14px 12px; margin: 14px 0;
+  cursor: pointer; transition: transform .1s ease;
 }
+.say-along:active { transform: scale(.97); }
 .story-box {
   background: var(--card); border: 5px solid var(--primary); border-radius: 24px;
   padding: 22px 20px; font-size: 34px; line-height: 1.9; box-shadow: var(--shadow);
