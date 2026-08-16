@@ -441,7 +441,7 @@ function renderLearnCard(u) {
       <div class="learn-word">${esc(it.words.join("、"))}</div>
       <div class="learn-sentence">${esc(it.s)}</div>
     </div>
-    <div class="say-along" onclick="A.sayAlong(${u.id},${learnIdx})">🗣️ 換你唸唸看:<b>${it.w}</b>,${esc(it.word)}</div>
+    <div class="say-along" id="sayAlong" onclick="A.sayAlong(${u.id},${learnIdx})">${sayAlongHtml(it)}</div>
     <div class="action-row">
       <button class="action-btn bg-blue" onclick="A.sayItem(${u.id},${learnIdx})">🔊 再聽一次</button>
       <button class="action-btn bg-purple" onclick="A.writeFromLearn(${u.id},${learnIdx})">✍️ 寫寫看</button>
@@ -458,10 +458,61 @@ A.sayItem = (uid, i) => {
   const it = UNIT_BY_ID[uid].items[i];
   speak(`${it.w}。${it.word}的${it.w}。${it.s}`);
 };
-// 點「換你唸唸看」:用最慢的速度示範唸一次,方便跟讀
+// 換你唸唸看:開麥克風聽你唸,唸對了大力稱讚;
+// 手機不支援語音辨識時,退回「慢速示範唸一次」讓人跟讀
+let recog = null, recogGuard = null;
+function sayAlongHtml(it) { return `🗣️ 換你唸唸看:<b>${it.w}</b>,${esc(it.word)}`; }
 A.sayAlong = (uid, i) => {
   const it = UNIT_BY_ID[uid].items[i];
-  speak(`${it.w}。${it.word}`, 0.8);
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { speak(`換你唸唸看。${it.w}。${it.word}`, 0.8); return; }
+  if (recog) return; // 已經在聽了,不要重複開
+  stopSpeak(); // 電腦先閉嘴,免得把自己的聲音聽進去
+  const el = document.getElementById("sayAlong");
+  const targets = [it.w, it.word, ...(it.words || [])].filter(Boolean);
+  let heard = "", denied = false;
+  let myRecog = null;
+  const done = () => {
+    if (!recog || recog !== myRecog) return; // 已被新的一輪取代就不動
+    recog = null;
+    clearTimeout(recogGuard);
+    try { if (myRecog.abort) myRecog.abort(); } catch (e) {}
+    if (el && document.body.contains(el)) {
+      el.classList.remove("listening");
+      el.innerHTML = sayAlongHtml(it);
+    } else return; // 已經離開這一頁,安靜收工
+    if (denied) return speak("要先允許使用麥克風,我才聽得到你唸喔!");
+    if (heard && targets.some(t => heard.includes(t))) {
+      bigPop("⭕"); confetti(10); applause(1);
+      speak(`唸得真好!就是「${it.w}」!`);
+    } else if (heard) {
+      speak(`我聽到你唸「${heard}」。再聽一次:${it.w}。${it.word}。然後再點一次唸唸看!`, 0.8);
+    } else {
+      speak("我沒有聽清楚,再點一次,大聲唸出來!");
+    }
+  };
+  try {
+    myRecog = recog = new SR();
+    recog.lang = "zh-TW";
+    recog.interimResults = false;
+    recog.maxAlternatives = 5;
+    recog.onresult = e => {
+      const alts = [];
+      for (const res of e.results) for (const a of res) alts.push((a.transcript || "").trim());
+      heard = alts.find(t => targets.some(x => t.includes(x))) || alts[0] || "";
+    };
+    recog.onerror = ev => { if (ev && ev.error === "not-allowed") denied = true; };
+    recog.onend = done;
+    if (el) {
+      el.classList.add("listening");
+      el.innerHTML = `🎤 我在聽…請大聲唸:<b>${it.w}</b>,${esc(it.word)}`;
+    }
+    recog.start();
+    recogGuard = setTimeout(done, 8000); // 最多聽 8 秒,沒聲音就收
+  } catch (e) {
+    recog = null;
+    speak(`換你唸唸看。${it.w}。${it.word}`, 0.8);
+  }
 };
 A.learnPrev = uid => { const u = UNIT_BY_ID[uid]; learnIdx = (learnIdx - 1 + u.items.length) % u.items.length; renderLearnCard(u); };
 A.learnNext = uid => {
